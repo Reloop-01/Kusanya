@@ -1,14 +1,13 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type Approval = {
   id: string;
   approver_id: string;
   decision: string;
-  full_name: string | null;
 };
 
 type WithdrawalRequest = {
@@ -23,11 +22,14 @@ type WithdrawalRequest = {
 
 export default function WithdrawalsPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
 
+  const [checkingAccess, setCheckingAccess] = useState(true);
   const [userId, setUserId] = useState('');
   const [myRole, setMyRole] = useState<string | null>(null);
   const [requests, setRequests] = useState<WithdrawalRequest[]>([]);
+  const [nameById, setNameById] = useState<Record<string, string>>({});
   const [amount, setAmount] = useState('');
   const [purpose, setPurpose] = useState('');
   const [error, setError] = useState('');
@@ -35,7 +37,11 @@ export default function WithdrawalsPage() {
 
   const loadData = useCallback(async () => {
     const { data: userData } = await supabase.auth.getUser();
-    const uid = userData.user?.id ?? '';
+    if (!userData.user) {
+      router.push('/login');
+      return;
+    }
+    const uid = userData.user.id;
     setUserId(uid);
 
     const { data: membership } = await supabase
@@ -44,26 +50,29 @@ export default function WithdrawalsPage() {
       .eq('project_id', projectId)
       .eq('user_id', uid)
       .maybeSingle();
+
     setMyRole(membership?.role ?? null);
+    setCheckingAccess(false);
+
+    if (!membership) return;
+
+    const { data: names } = await supabase.rpc('get_project_member_names', {
+      p_project_id: projectId,
+    });
+    const names2: Record<string, string> = {};
+    (names ?? []).forEach((n: any) => {
+      names2[n.user_id] = n.full_name;
+    });
+    setNameById(names2);
 
     const { data: reqs } = await supabase
       .from('withdrawal_requests')
-      .select('id, amount, purpose, status, requester_id, created_at, withdrawal_approvals(id, approver_id, decision, profiles(full_name))')
+      .select('id, amount, purpose, status, requester_id, created_at, withdrawal_approvals(id, approver_id, decision)')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 
-    setRequests(
-      (reqs ?? []).map((r: any) => ({
-        ...r,
-        withdrawal_approvals: (r.withdrawal_approvals ?? []).map((a: any) => ({
-          id: a.id,
-          approver_id: a.approver_id,
-          decision: a.decision,
-          full_name: a.profiles?.full_name ?? 'Unknown',
-        })),
-      }))
-    );
-  }, [projectId]);
+    setRequests((reqs ?? []) as any);
+  }, [projectId, router]);
 
   useEffect(() => {
     loadData();
@@ -110,6 +119,20 @@ export default function WithdrawalsPage() {
   const canRequest = myRole === 'organizer' || myRole === 'administrator';
   const canApprove = myRole === 'approver' || myRole === 'administrator';
 
+  if (checkingAccess) {
+    return <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}><p>Loading...</p></main>;
+  }
+
+  if (!myRole) {
+    return (
+      <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
+        <h1>Not authorized</h1>
+        <p>You&apos;re not a member of this project.</p>
+        <a href="/dashboard">Back to dashboard</a>
+      </main>
+    );
+  }
+
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
       <h1>Withdrawal requests</h1>
@@ -142,7 +165,7 @@ export default function WithdrawalsPage() {
               Status: <strong>{r.status}</strong>
               <ul>
                 {r.withdrawal_approvals.map((a) => (
-                  <li key={a.id}>{a.full_name}: {a.decision}</li>
+                  <li key={a.id}>{nameById[a.approver_id] ?? 'Unknown'}: {a.decision}</li>
                 ))}
               </ul>
               {canApprove && !isRequester && !alreadyVoted && r.status === 'pending' && (

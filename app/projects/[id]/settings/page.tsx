@@ -1,29 +1,55 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 type Member = {
   id: string;
   user_id: string;
   role: string;
-  full_name: string | null;
+  full_name: string;
 };
 
 export default function ProjectSettingsPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
 
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [myRole, setMyRole] = useState<string | null>(null);
   const [projectTitle, setProjectTitle] = useState('');
   const [members, setMembers] = useState<Member[]>([]);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('approver');
   const [minApprovals, setMinApprovals] = useState('1');
   const [error, setError] = useState('');
+  const [ruleError, setRuleError] = useState('');
+  const [ruleSaved, setRuleSaved] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      router.push('/login');
+      return;
+    }
+
+    const { data: membership } = await supabase
+      .from('project_members')
+      .select('role')
+      .eq('project_id', projectId)
+      .eq('user_id', userData.user.id)
+      .maybeSingle();
+
+    if (!membership) {
+      setCheckingAccess(false);
+      setMyRole(null);
+      return;
+    }
+    setMyRole(membership.role);
+    setCheckingAccess(false);
+
     const { data: project } = await supabase
       .from('projects')
       .select('title')
@@ -33,15 +59,23 @@ export default function ProjectSettingsPage() {
 
     const { data: memberRows } = await supabase
       .from('project_members')
-      .select('id, user_id, role, profiles(full_name)')
+      .select('id, user_id, role')
       .eq('project_id', projectId);
 
+    const { data: names } = await supabase.rpc('get_project_member_names', {
+      p_project_id: projectId,
+    });
+    const nameById: Record<string, string> = {};
+    (names ?? []).forEach((n: any) => {
+      nameById[n.user_id] = n.full_name;
+    });
+
     setMembers(
-      (memberRows ?? []).map((m: any) => ({
+      (memberRows ?? []).map((m) => ({
         id: m.id,
         user_id: m.user_id,
         role: m.role,
-        full_name: m.profiles?.full_name ?? 'Unknown',
+        full_name: nameById[m.user_id] ?? 'Unknown',
       }))
     );
 
@@ -52,7 +86,7 @@ export default function ProjectSettingsPage() {
       .maybeSingle();
 
     if (rule) setMinApprovals(String(rule.min_approvals));
-  }, [projectId]);
+  }, [projectId, router]);
 
   useEffect(() => {
     loadData();
@@ -82,7 +116,11 @@ export default function ProjectSettingsPage() {
     setLoading(false);
 
     if (insertError) {
-      setError(insertError.message);
+      if (insertError.code === '23505') {
+        setError('This person already has a role on this project. Remove their existing role first to change it.');
+      } else {
+        setError(insertError.message);
+      }
       return;
     }
 
@@ -92,7 +130,8 @@ export default function ProjectSettingsPage() {
 
   async function handleSaveRule(e: React.FormEvent) {
     e.preventDefault();
-    setError('');
+    setRuleError('');
+    setRuleSaved(false);
 
     const { error: upsertError } = await supabase
       .from('approval_rules')
@@ -101,7 +140,28 @@ export default function ProjectSettingsPage() {
         { onConflict: 'project_id' }
       );
 
-    if (upsertError) setError(upsertError.message);
+    if (upsertError) {
+      setRuleError(upsertError.message);
+      return;
+    }
+    setRuleSaved(true);
+    setTimeout(() => setRuleSaved(false), 3000);
+  }
+
+  const isOrganizer = myRole === 'organizer';
+
+  if (checkingAccess) {
+    return <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}><p>Loading...</p></main>;
+  }
+
+  if (!myRole) {
+    return (
+      <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
+        <h1>Not authorized</h1>
+        <p>You&apos;re not a member of this project.</p>
+        <a href="/dashboard">Back to dashboard</a>
+      </main>
+    );
   }
 
   return (
@@ -117,33 +177,47 @@ export default function ProjectSettingsPage() {
         ))}
       </ul>
 
-      <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: 12, margin: '16px 0 32px' }}>
-        <input type="email" placeholder="Their email (must already have a Kusanya account)"
-          value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <select value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="approver">Approver (can approve/reject withdrawals)</option>
-          <option value="administrator">Administrator (can also record contributions)</option>
-          <option value="contributor">Contributor</option>
-          <option value="auditor">Auditor (view only)</option>
-        </select>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" disabled={loading}>
-          {loading ? 'Adding...' : 'Add team member'}
-        </button>
-      </form>
+      {isOrganizer ? (
+        <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: 12, margin: '16px 0 32px' }}>
+          <input type="email" placeholder="Their email (must already have a Kusanya account)"
+            value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <select value={role} onChange={(e) => setRole(e.target.value)}>
+            <option value="approver">Approver (can approve/reject withdrawals)</option>
+            <option value="administrator">Administrator (can also record contributions)</option>
+            <option value="contributor">Contributor</option>
+            <option value="auditor">Auditor (view only)</option>
+          </select>
+          {error && <p style={{ color: 'red' }}>{error}</p>}
+          <button type="submit" disabled={loading}>
+            {loading ? 'Adding...' : 'Add team member'}
+          </button>
+        </form>
+      ) : (
+        <p style={{ color: '#666', fontSize: 14, margin: '16px 0 32px' }}>
+          Only the organizer can add or change team members.
+        </p>
+      )}
 
       <h2>Approval rule</h2>
-      <form onSubmit={handleSaveRule} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-        <label>
-          Approvals required before a withdrawal is approved:
-          <input type="number" min="1" value={minApprovals}
-            onChange={(e) => setMinApprovals(e.target.value)} style={{ marginLeft: 8, width: 60 }} />
-        </label>
-        <button type="submit">Save</button>
-      </form>
-      <p style={{ color: '#666', fontSize: 14 }}>
-        You currently have {members.length} team member(s). Choose a number equal to or less than that.
-      </p>
+      {isOrganizer ? (
+        <form onSubmit={handleSaveRule} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label>
+            Approvals required before a withdrawal is approved:
+            <input type="number" min="1" value={minApprovals}
+              onChange={(e) => setMinApprovals(e.target.value)} style={{ marginLeft: 8, width: 60 }} />
+          </label>
+          <button type="submit">Save</button>
+          {ruleSaved && <span style={{ color: 'green' }}>Saved!</span>}
+        </form>
+      ) : (
+        <p>This project currently requires <strong>{minApprovals}</strong> approval(s) per withdrawal.</p>
+      )}
+      {ruleError && <p style={{ color: 'red' }}>{ruleError}</p>}
+      {isOrganizer && (
+        <p style={{ color: '#666', fontSize: 14 }}>
+          You currently have {members.length} team member(s). The rule can&apos;t exceed the number of eligible approvers.
+        </p>
+      )}
     </main>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { QRCodeSVG } from 'qrcode.react';
 
@@ -16,8 +16,11 @@ type Contribution = {
 
 export default function ManageProjectPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
 
+  const [checkingAccess, setCheckingAccess] = useState(true);
+  const [hasAccess, setHasAccess] = useState(false);
   const [projectTitle, setProjectTitle] = useState('');
   const [projectSlug, setProjectSlug] = useState('');
   const [copied, setCopied] = useState(false);
@@ -29,6 +32,25 @@ export default function ManageProjectPage() {
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) {
+      router.push('/login');
+      return;
+    }
+
+    const { data: membership } = await supabase
+      .from('project_members')
+      .select('role')
+      .eq('project_id', projectId)
+      .eq('user_id', userData.user.id)
+      .maybeSingle();
+
+    const allowed = membership?.role === 'organizer' || membership?.role === 'administrator';
+    setHasAccess(allowed);
+    setCheckingAccess(false);
+
+    if (!allowed) return;
+
     const { data: project } = await supabase
       .from('projects')
       .select('title, slug')
@@ -43,7 +65,7 @@ export default function ManageProjectPage() {
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
     setContributions(contribs ?? []);
-  }, [projectId]);
+  }, [projectId, router]);
 
   useEffect(() => {
     loadData();
@@ -80,6 +102,20 @@ export default function ManageProjectPage() {
     loadData();
   }
 
+  if (checkingAccess) {
+    return <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}><p>Loading...</p></main>;
+  }
+
+  if (!hasAccess) {
+    return (
+      <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
+        <h1>Not authorized</h1>
+        <p>You don&apos;t have permission to manage this project.</p>
+        <a href="/dashboard">Back to dashboard</a>
+      </main>
+    );
+  }
+
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
       <h1>{projectTitle}</h1>
@@ -104,6 +140,11 @@ export default function ManageProjectPage() {
           </button>
         </div>
       )}
+
+      <div style={{ marginBottom: 24 }}>
+        <a href={`/projects/${projectId}/settings`} style={{ marginRight: 16 }}>Team & approval settings</a>
+        <a href={`/projects/${projectId}/withdrawals`}>Withdrawal requests</a>
+      </div>
 
       <h2>Record a contribution</h2>
       <form onSubmit={handleAddContribution} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
