@@ -12,6 +12,7 @@ type Project = {
   currency: string;
   deadline: string | null;
   status: string;
+  payment_instructions: string | null;
 };
 
 export default function PublicProjectPage() {
@@ -25,7 +26,7 @@ export default function PublicProjectPage() {
     async function load() {
       const { data } = await supabase
         .from('projects')
-        .select('id, title, purpose, target_amount, currency, deadline, status')
+        .select('id, title, purpose, target_amount, currency, deadline, status, payment_instructions')
         .eq('slug', slug)
         .single();
 
@@ -73,6 +74,16 @@ export default function PublicProjectPage() {
 
       {project.deadline && <p><strong>Deadline:</strong> {project.deadline}</p>}
       <p><strong>Status:</strong> {project.status}</p>
+
+      {project.payment_instructions && (
+        <div style={{ border: '2px solid #22a06b', borderRadius: 8, padding: 16, marginTop: 24, background: '#f4fbf8' }}>
+          <h2 style={{ marginTop: 0 }}>How to contribute</h2>
+          <p style={{ whiteSpace: 'pre-line' }}>{project.payment_instructions}</p>
+          <p style={{ fontSize: 13, color: '#666' }}>
+            After paying, let the organizer know so they can confirm your contribution.
+          </p>
+        </div>
+      )}
     </main>
   );
 }

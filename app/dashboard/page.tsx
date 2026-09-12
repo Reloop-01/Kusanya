@@ -10,6 +10,7 @@ type Project = {
   target_amount: number;
   slug: string;
   status: string;
+  role: string;
 };
 
 export default function DashboardPage() {
@@ -27,12 +28,36 @@ export default function DashboardPage() {
       }
       setEmail(userData.user.email ?? null);
 
+      const { data: memberRows } = await supabase
+        .from('project_members')
+        .select('project_id, role')
+        .eq('user_id', userData.user.id);
+
+      const roleByProjectId: Record<string, string> = {};
+      (memberRows ?? []).forEach((m) => {
+        roleByProjectId[m.project_id] = m.role;
+      });
+
+      const projectIds = Object.keys(roleByProjectId);
+
+      if (projectIds.length === 0) {
+        setProjects([]);
+        setLoadingProjects(false);
+        return;
+      }
+
       const { data: projectsData } = await supabase
         .from('projects')
         .select('id, title, target_amount, slug, status')
+        .in('id', projectIds)
         .order('created_at', { ascending: false });
 
-      setProjects(projectsData ?? []);
+      setProjects(
+        (projectsData ?? []).map((p) => ({
+          ...p,
+          role: roleByProjectId[p.id],
+        }))
+      );
       setLoadingProjects(false);
     }
     load();
@@ -60,15 +85,15 @@ export default function DashboardPage() {
 
       <h2>Your projects</h2>
       {loadingProjects && <p>Loading...</p>}
-      {!loadingProjects && projects.length === 0 && <p>You haven&apos;t created any projects yet.</p>}
+      {!loadingProjects && projects.length === 0 && <p>You aren&apos;t part of any projects yet.</p>}
       <ul style={{ listStyle: 'none', padding: 0 }}>
         {projects.map((project) => (
           <li key={project.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 8 }}>
-            <a href={`/projects/${project.id}`}><strong>{project.title}</strong></a> — Target: KES {project.target_amount.toLocaleString()}
+            <a href={`/projects/${project.id}`}><strong>{project.title}</strong></a> — Target: KES {project.target_amount}
             <br />
-            Status: {project.status}
+            Your role: {project.role} · Status: {project.status}
             <br />
-            Shareable link (not live yet): <code>/p/{project.slug}</code>
+            Shareable link: <code>/p/{project.slug}</code>
           </li>
         ))}
       </ul>

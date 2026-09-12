@@ -5,31 +5,26 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { QRCodeSVG } from 'qrcode.react';
 
-type Contribution = {
-  id: string;
-  contributor_name: string | null;
-  amount: number;
-  reference: string | null;
+type ProjectInfo = {
+  title: string;
+  purpose: string | null;
+  target_amount: number;
+  currency: string;
+  deadline: string | null;
   status: string;
-  created_at: string;
+  slug: string;
 };
 
-export default function ManageProjectPage() {
+export default function ProjectHubPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
 
   const [checkingAccess, setCheckingAccess] = useState(true);
-  const [hasAccess, setHasAccess] = useState(false);
-  const [projectTitle, setProjectTitle] = useState('');
-  const [projectSlug, setProjectSlug] = useState('');
+  const [myRole, setMyRole] = useState<string | null>(null);
+  const [project, setProject] = useState<ProjectInfo | null>(null);
+  const [total, setTotal] = useState(0);
   const [copied, setCopied] = useState(false);
-  const [contributions, setContributions] = useState<Contribution[]>([]);
-  const [name, setName] = useState('');
-  const [amount, setAmount] = useState('');
-  const [reference, setReference] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -45,141 +40,96 @@ export default function ManageProjectPage() {
       .eq('user_id', userData.user.id)
       .maybeSingle();
 
-    const allowed = membership?.role === 'organizer' || membership?.role === 'administrator';
-    setHasAccess(allowed);
+    setMyRole(membership?.role ?? null);
     setCheckingAccess(false);
 
-    if (!allowed) return;
+    if (!membership) return;
 
-    const { data: project } = await supabase
+    const { data: projectData } = await supabase
       .from('projects')
-      .select('title, slug')
+      .select('title, purpose, target_amount, currency, deadline, status, slug')
       .eq('id', projectId)
       .single();
-    setProjectTitle(project?.title ?? '');
-    setProjectSlug(project?.slug ?? '');
+    setProject(projectData);
 
-    const { data: contribs } = await supabase
-      .from('contributions')
-      .select('id, contributor_name, amount, reference, status, created_at')
-      .eq('project_id', projectId)
-      .order('created_at', { ascending: false });
-    setContributions(contribs ?? []);
+    const { data: totalData } = await supabase.rpc('get_project_total_for_member', {
+      p_project_id: projectId,
+    });
+    setTotal(totalData ?? 0);
   }, [projectId, router]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  async function handleAddContribution(e: React.FormEvent) {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
-    const { error: insertError } = await supabase.from('contributions').insert({
-      project_id: projectId,
-      contributor_name: name,
-      amount: Number(amount),
-      reference: reference || null,
-      status: 'pending',
-    });
-
-    setLoading(false);
-
-    if (insertError) {
-      setError(insertError.message);
-      return;
-    }
-
-    setName('');
-    setAmount('');
-    setReference('');
-    loadData();
-  }
-
-  async function updateStatus(id: string, status: 'confirmed' | 'rejected') {
-    await supabase.from('contributions').update({ status }).eq('id', id);
-    loadData();
-  }
+  const canRecordContributions = myRole === 'organizer' || myRole === 'administrator';
 
   if (checkingAccess) {
     return <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}><p>Loading...</p></main>;
   }
 
-  if (!hasAccess) {
+  if (!myRole || !project) {
     return (
       <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
         <h1>Not authorized</h1>
-        <p>You don&apos;t have permission to manage this project.</p>
+        <p>You&apos;re not a member of this project.</p>
         <a href="/dashboard">Back to dashboard</a>
       </main>
     );
   }
 
+  const percent = Math.min(100, Math.round((total / project.target_amount) * 100));
+
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
-      <h1>{projectTitle}</h1>
+      <h1>{project.title}</h1>
+      {project.purpose && <p>{project.purpose}</p>}
 
-      {projectSlug && (
-        <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 16, marginBottom: 32, textAlign: 'center' }}>
-          <QRCodeSVG
-            value={`${typeof window !== 'undefined' ? window.location.origin : ''}/p/${projectSlug}`}
-            size={160}
-          />
-          <p style={{ marginTop: 12, wordBreak: 'break-all' }}>
-            {typeof window !== 'undefined' ? window.location.origin : ''}/p/{projectSlug}
-          </p>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(`${window.location.origin}/p/${projectSlug}`);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }}
-          >
-            {copied ? 'Copied!' : 'Copy link'}
-          </button>
+      <div style={{ margin: '20px 0' }}>
+        <div style={{ background: '#eee', borderRadius: 8, height: 16, overflow: 'hidden' }}>
+          <div style={{ background: '#22a06b', height: '100%', width: `${percent}%` }} />
         </div>
-      )}
-
-      <div style={{ marginBottom: 24 }}>
-        <a href={`/projects/${projectId}/settings`} style={{ marginRight: 16 }}>Team & approval settings</a>
-        <a href={`/projects/${projectId}/withdrawals`}>Withdrawal requests</a>
+        <p style={{ marginTop: 8 }}>
+          {project.currency} {total.toLocaleString()} raised of {project.currency}{' '}
+          {project.target_amount.toLocaleString()} ({percent}%)
+        </p>
       </div>
 
-      <h2>Record a contribution</h2>
-      <form onSubmit={handleAddContribution} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
-        <input type="text" placeholder="Contributor name" value={name}
-          onChange={(e) => setName(e.target.value)} required />
-        <input type="number" min="1" placeholder="Amount (KES)" value={amount}
-          onChange={(e) => setAmount(e.target.value)} required />
-        <input type="text" placeholder="Reference / M-Pesa code (optional)" value={reference}
-          onChange={(e) => setReference(e.target.value)} />
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" disabled={loading}>
-          {loading ? 'Saving...' : 'Add contribution'}
-        </button>
-      </form>
+      {project.deadline && <p><strong>Deadline:</strong> {project.deadline}</p>}
+      <p><strong>Status:</strong> {project.status} · <strong>Your role:</strong> {myRole}</p>
 
-      <h2>All contributions</h2>
-      {contributions.length === 0 && <p>No contributions recorded yet.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {contributions.map((c) => (
-          <li key={c.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 8 }}>
-            <strong>{c.contributor_name}</strong> — KES {c.amount.toLocaleString()}
-            {c.reference && <> (ref: {c.reference})</>}
-            <br />
-            Status: <strong>{c.status}</strong>
-            {c.status === 'pending' && (
-              <div style={{ marginTop: 8 }}>
-                <button onClick={() => updateStatus(c.id, 'confirmed')} style={{ marginRight: 8 }}>
-                  Confirm
-                </button>
-                <button onClick={() => updateStatus(c.id, 'rejected')}>Reject</button>
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
+      <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 16, margin: '24px 0', textAlign: 'center' }}>
+        <QRCodeSVG
+          value={`${typeof window !== 'undefined' ? window.location.origin : ''}/p/${project.slug}`}
+          size={160}
+        />
+        <p style={{ marginTop: 12, wordBreak: 'break-all' }}>
+          {typeof window !== 'undefined' ? window.location.origin : ''}/p/{project.slug}
+        </p>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(`${window.location.origin}/p/${project.slug}`);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }}
+        >
+          {copied ? 'Copied!' : 'Copy link to share'}
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {canRecordContributions && (
+          <a href={`/projects/${projectId}/contributions`}>
+            <button style={{ width: '100%' }}>Record a contribution</button>
+          </a>
+        )}
+        <a href={`/projects/${projectId}/settings`}>
+          <button style={{ width: '100%' }}>Team & approval settings</button>
+        </a>
+        <a href={`/projects/${projectId}/withdrawals`}>
+          <button style={{ width: '100%' }}>Withdrawal requests</button>
+        </a>
+      </div>
     </main>
   );
 }

@@ -23,9 +23,12 @@ export default function ProjectSettingsPage() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('approver');
   const [minApprovals, setMinApprovals] = useState('1');
+  const [paymentInstructions, setPaymentInstructions] = useState('');
   const [error, setError] = useState('');
   const [ruleError, setRuleError] = useState('');
   const [ruleSaved, setRuleSaved] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentSaved, setPaymentSaved] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -52,10 +55,11 @@ export default function ProjectSettingsPage() {
 
     const { data: project } = await supabase
       .from('projects')
-      .select('title')
+      .select('title, payment_instructions')
       .eq('id', projectId)
       .single();
     setProjectTitle(project?.title ?? '');
+    setPaymentInstructions(project?.payment_instructions ?? '');
 
     const { data: memberRows } = await supabase
       .from('project_members')
@@ -148,6 +152,24 @@ export default function ProjectSettingsPage() {
     setTimeout(() => setRuleSaved(false), 3000);
   }
 
+  async function handleSavePaymentInstructions(e: React.FormEvent) {
+    e.preventDefault();
+    setPaymentError('');
+    setPaymentSaved(false);
+
+    const { error: updateError } = await supabase
+      .from('projects')
+      .update({ payment_instructions: paymentInstructions })
+      .eq('id', projectId);
+
+    if (updateError) {
+      setPaymentError(updateError.message);
+      return;
+    }
+    setPaymentSaved(true);
+    setTimeout(() => setPaymentSaved(false), 3000);
+  }
+
   const isOrganizer = myRole === 'organizer';
 
   if (checkingAccess) {
@@ -167,6 +189,29 @@ export default function ProjectSettingsPage() {
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
       <h1>{projectTitle} — Settings</h1>
+
+      <h2>How to contribute</h2>
+      {isOrganizer ? (
+        <form onSubmit={handleSavePaymentInstructions} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
+          <textarea
+            placeholder={'e.g. M-Pesa Paybill: 247247\nAccount: PIANO2026\nPlease use your name as the reference.'}
+            value={paymentInstructions}
+            onChange={(e) => setPaymentInstructions(e.target.value)}
+            rows={4}
+            style={{ width: '100%' }}
+          />
+          <button type="submit">Save</button>
+          {paymentSaved && <span style={{ color: 'green' }}>Saved!</span>}
+          {paymentError && <p style={{ color: 'red' }}>{paymentError}</p>}
+          <p style={{ color: '#666', fontSize: 14 }}>
+            This is shown publicly on your project&apos;s shareable page, so anyone with the link knows exactly how to pay.
+          </p>
+        </form>
+      ) : (
+        <p style={{ whiteSpace: 'pre-line', marginBottom: 32 }}>
+          {paymentInstructions || 'The organizer hasn\'t added payment instructions yet.'}
+        </p>
+      )}
 
       <h2>Team members</h2>
       <ul style={{ listStyle: 'none', padding: 0 }}>
