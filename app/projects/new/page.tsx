@@ -76,39 +76,44 @@ export default function NewProjectPage() {
   }
 
   return (
-    <main style={{ maxWidth: 480, margin: '60px auto', padding: 24 }}>
-      <h1>Start a new project</h1>
-      <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label>
-          Project title
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required style={{ width: '100%' }} />
-        </label>
-        <label>
-          Purpose / description
-          <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} style={{ width: '100%' }} />
-        </label>
-        <label>
-          Target amount (KES)
-          <input type="number" min="1" value={targetAmount}
-            onChange={(e) => setTargetAmount(e.target.value)} required style={{ width: '100%' }} />
-        </label>
-        <label>
-          Deadline (optional)
-          <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} style={{ width: '100%' }} />
-        </label>
-        <label>
-          Who can see this project?
-          <select value={visibility} onChange={(e) => setVisibility(e.target.value)} style={{ width: '100%' }}>
-            <option value="private">Private (only people I add)</option>
-            <option value="link_only">Anyone with the link</option>
-            <option value="public">Public (searchable)</option>
-          </select>
-        </label>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" disabled={loading}>
-          {loading ? 'Creating...' : 'Create project'}
-        </button>
-      </form>
+        <main style={{ maxWidth: 480, margin: '60px auto', padding: 24 }}>
+      <p style={{ marginBottom: 16 }}><a href="/dashboard">← Back to dashboard</a></p>
+      <div className="card">
+        <div className="card-stripe"><span></span><span></span></div>
+        <h1>Start a new project</h1>
+        <p className="muted-text" style={{ marginBottom: 20 }}>Set up a shareable project for your group.</p>
+        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label>
+            Project title
+            <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required style={{ width: '100%', marginTop: 4 }} />
+          </label>
+          <label>
+            Purpose / description
+            <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} style={{ width: '100%', marginTop: 4 }} />
+          </label>
+          <label>
+            Target amount (KES)
+            <input type="number" min="1" value={targetAmount}
+              onChange={(e) => setTargetAmount(e.target.value)} required style={{ width: '100%', marginTop: 4 }} />
+          </label>
+          <label>
+            Deadline (optional)
+            <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} style={{ width: '100%', marginTop: 4 }} />
+          </label>
+          <label>
+            Who can see this project?
+            <select value={visibility} onChange={(e) => setVisibility(e.target.value)} style={{ width: '100%', marginTop: 4 }}>
+              <option value="private">Private (only people I add)</option>
+              <option value="link_only">Anyone with the link</option>
+              <option value="public">Public (searchable)</option>
+            </select>
+          </label>
+          {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
+          <button type="submit" disabled={loading} style={{ width: '100%' }}>
+            {loading ? 'Creating...' : 'Create project'}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }

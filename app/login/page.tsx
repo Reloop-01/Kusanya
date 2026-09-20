@@ -27,19 +27,23 @@ export default function LoginPage() {
   }
 
   return (
-    <main style={{ maxWidth: 400, margin: '80px auto', padding: 24 }}>
-      <h1>Log in to Kusanya</h1>
-      <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <input type="email" placeholder="Email" value={email}
-          onChange={(e) => setEmail(e.target.value)} required />
-        <input type="password" placeholder="Password" value={password}
-          onChange={(e) => setPassword(e.target.value)} required />
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" disabled={loading}>
-          {loading ? 'Logging in...' : 'Log in'}
-        </button>
-      </form>
-      <p style={{ marginTop: 16 }}>No account yet? <a href="/signup">Sign up</a></p>
+    <main style={{ maxWidth: 380, margin: '100px auto', padding: 24 }}>
+      <div className="card">
+        <div className="card-stripe"><span></span><span></span></div>
+        <h1>Log in</h1>
+        <p className="muted-text" style={{ marginBottom: 20 }}>Welcome back to Kusanya.</p>
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <input type="email" placeholder="Email" value={email}
+            onChange={(e) => setEmail(e.target.value)} required />
+          <input type="password" placeholder="Password" value={password}
+            onChange={(e) => setPassword(e.target.value)} required />
+          {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
+          <button type="submit" disabled={loading} style={{ width: '100%' }}>
+            {loading ? 'Logging in...' : 'Log in'}
+          </button>
+        </form>
+        <p className="muted-text" style={{ marginTop: 16 }}>No account yet? <a href="/signup">Sign up</a></p>
+      </div>
     </main>
   );
 }

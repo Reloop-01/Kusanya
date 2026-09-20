@@ -11,6 +11,7 @@ type Project = {
   slug: string;
   status: string;
   role: string;
+  total: number;
 };
 
 export default function DashboardPage() {
@@ -52,12 +53,16 @@ export default function DashboardPage() {
         .in('id', projectIds)
         .order('created_at', { ascending: false });
 
-      setProjects(
-        (projectsData ?? []).map((p) => ({
-          ...p,
-          role: roleByProjectId[p.id],
-        }))
+      const withTotals = await Promise.all(
+        (projectsData ?? []).map(async (p) => {
+          const { data: total } = await supabase.rpc('get_project_total_for_member', {
+            p_project_id: p.id,
+          });
+          return { ...p, role: roleByProjectId[p.id], total: total ?? 0 };
+        })
       );
+
+      setProjects(withTotals);
       setLoadingProjects(false);
     }
     load();
@@ -71,32 +76,46 @@ export default function DashboardPage() {
   if (!email) return null;
 
   return (
-    <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1>Welcome, {email}</h1>
+    <main style={{ maxWidth: 700, margin: '60px auto', padding: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <h1 style={{ marginBottom: 0 }}>Welcome back</h1>
         <button onClick={handleLogout}>Log out</button>
       </div>
+      <p className="muted-text" style={{ marginBottom: 24 }}>{email}</p>
 
-      <div style={{ margin: '24px 0' }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 32, flexWrap: 'wrap' }}>
         <a href="/projects/new">
           <button>+ Start a new project</button>
+        </a>
+        <a href="/discover">
+          <button>Discover public projects</button>
         </a>
       </div>
 
       <h2>Your projects</h2>
       {loadingProjects && <p>Loading...</p>}
       {!loadingProjects && projects.length === 0 && <p>You aren&apos;t part of any projects yet.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
-        {projects.map((project) => (
-          <li key={project.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 8 }}>
-            <a href={`/projects/${project.id}`}><strong>{project.title}</strong></a> — Target: KES {project.target_amount}
-            <br />
-            Your role: {project.role} · Status: {project.status}
-            <br />
-            Shareable link: <code>/p/{project.slug}</code>
-          </li>
-        ))}
-      </ul>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+        {projects.map((project) => {
+          const percent = Math.min(100, Math.round((project.total / project.target_amount) * 100));
+          return (
+            <a key={project.id} href={`/projects/${project.id}`} className="card" style={{ display: 'block', color: 'inherit' }}>
+              <div className="card-stripe"><span></span><span></span></div>
+              <div className="card-label">
+                <span>Your role: {project.role}</span>
+              </div>
+              <h1 style={{ fontSize: 16, marginBottom: 12 }}>{project.title}</h1>
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${percent}%` }} />
+              </div>
+              <p className="muted-text">
+                KES {project.total.toLocaleString()} of {project.target_amount.toLocaleString()} · {project.status}
+              </p>
+            </a>
+          );
+        })}
+      </div>
     </main>
   );
 }

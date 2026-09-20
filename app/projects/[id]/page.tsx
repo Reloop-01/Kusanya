@@ -13,6 +13,7 @@ type ProjectInfo = {
   deadline: string | null;
   status: string;
   slug: string;
+  payment_instructions: string | null;
 };
 
 export default function ProjectHubPage() {
@@ -24,6 +25,7 @@ export default function ProjectHubPage() {
   const [myRole, setMyRole] = useState<string | null>(null);
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [total, setTotal] = useState(0);
+  const [available, setAvailable] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -47,7 +49,7 @@ export default function ProjectHubPage() {
 
     const { data: projectData } = await supabase
       .from('projects')
-      .select('title, purpose, target_amount, currency, deadline, status, slug')
+      .select('title, purpose, target_amount, currency, deadline, status, slug, payment_instructions')
       .eq('id', projectId)
       .single();
     setProject(projectData);
@@ -56,6 +58,11 @@ export default function ProjectHubPage() {
       p_project_id: projectId,
     });
     setTotal(totalData ?? 0);
+
+    const { data: availableData } = await supabase.rpc('get_project_available_balance', {
+      p_project_id: projectId,
+    });
+    setAvailable(availableData ?? 0);
   }, [projectId, router]);
 
   useEffect(() => {
@@ -63,6 +70,7 @@ export default function ProjectHubPage() {
   }, [loadData]);
 
   const canRecordContributions = myRole === 'organizer' || myRole === 'administrator';
+  const isOrganizer = myRole === 'organizer';
 
   if (checkingAccess) {
     return <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}><p>Loading...</p></main>;
@@ -79,31 +87,78 @@ export default function ProjectHubPage() {
   }
 
   const percent = Math.min(100, Math.round((total / project.target_amount) * 100));
+  const isFullyFunded = total >= project.target_amount;
 
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
-      <h1>{project.title}</h1>
-      {project.purpose && <p>{project.purpose}</p>}
+      <p style={{ marginBottom: 16 }}><a href="/dashboard">← Back to dashboard</a></p>
 
-      <div style={{ margin: '20px 0' }}>
-        <div style={{ background: '#eee', borderRadius: 8, height: 16, overflow: 'hidden' }}>
-          <div style={{ background: '#22a06b', height: '100%', width: `${percent}%` }} />
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div className="card-stripe"><span></span><span></span></div>
+        <div className="card-label">
+          <span>Your role: {myRole}</span>
         </div>
-        <p style={{ marginTop: 8 }}>
-          {project.currency} {total.toLocaleString()} raised of {project.currency}{' '}
-          {project.target_amount.toLocaleString()} ({percent}%)
+        <h1>{project.title}</h1>
+        {project.purpose && <p style={{ marginBottom: 18 }}>{project.purpose}</p>}
+
+        {isFullyFunded ? (
+          <div style={{ background: 'var(--color-primary)', color: 'white', borderRadius: 10, padding: '14px 16px', marginBottom: 14, textAlign: 'center' }}>
+            <strong>🎉 Fully funded!</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 13, opacity: 0.9 }}>
+              {project.currency} {total.toLocaleString()} raised of {project.currency} {project.target_amount.toLocaleString()}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${percent}%` }} />
+            </div>
+            <p className="muted-text" style={{ marginBottom: 14 }}>
+              {project.currency} {total.toLocaleString()} raised of {project.currency}{' '}
+              {project.target_amount.toLocaleString()} ({percent}%)
+            </p>
+          </>
+        )}
+
+        {available !== null && (
+          <p className="muted-text" style={{ marginBottom: 8 }}>
+            Available to withdraw: <strong style={{ color: 'var(--color-ink)' }}>{project.currency} {available.toLocaleString()}</strong>
+          </p>
+        )}
+
+        <p className="muted-text">
+          {project.deadline && <>Deadline: {project.deadline} · </>}Status: {project.status}
         </p>
       </div>
 
-      {project.deadline && <p><strong>Deadline:</strong> {project.deadline}</p>}
-      <p><strong>Status:</strong> {project.status} · <strong>Your role:</strong> {myRole}</p>
+      {project.payment_instructions ? (
+        <div
+          style={{
+            border: '1px solid var(--color-primary)',
+            background: 'var(--color-track)',
+            borderRadius: 10,
+            padding: 16,
+            marginBottom: 20,
+          }}
+        >
+          <h2 style={{ marginTop: 0, color: 'var(--color-primary)' }}>How to contribute</h2>
+          <p style={{ whiteSpace: 'pre-line' }}>{project.payment_instructions}</p>
+        </div>
+      ) : (
+        isOrganizer && (
+          <p className="muted-text" style={{ marginBottom: 20 }}>
+            You haven&apos;t added payment instructions yet — visitors won&apos;t know how to pay.{' '}
+            <a href={`/projects/${projectId}/settings`}>Add them in Settings</a>.
+          </p>
+        )
+      )}
 
-      <div style={{ border: '1px solid #ddd', borderRadius: 8, padding: 16, margin: '24px 0', textAlign: 'center' }}>
+      <div className="card" style={{ textAlign: 'center', marginBottom: 20 }}>
         <QRCodeSVG
           value={`${typeof window !== 'undefined' ? window.location.origin : ''}/p/${project.slug}`}
           size={160}
         />
-        <p style={{ marginTop: 12, wordBreak: 'break-all' }}>
+        <p className="muted-text" style={{ marginTop: 12, marginBottom: 12, wordBreak: 'break-all' }}>
           {typeof window !== 'undefined' ? window.location.origin : ''}/p/{project.slug}
         </p>
         <button

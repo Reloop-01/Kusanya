@@ -8,6 +8,7 @@ type Approval = {
   id: string;
   approver_id: string;
   decision: string;
+  reason: string | null;
 };
 
 type WithdrawalRequest = {
@@ -19,6 +20,12 @@ type WithdrawalRequest = {
   created_at: string;
   withdrawal_approvals: Approval[];
 };
+
+function statusColor(status: string) {
+  if (status === 'approved' || status === 'paid') return 'var(--color-primary)';
+  if (status === 'rejected') return 'var(--color-danger)';
+  return 'var(--color-accent)';
+}
 
 export default function WithdrawalsPage() {
   const params = useParams();
@@ -67,7 +74,7 @@ export default function WithdrawalsPage() {
 
     const { data: reqs } = await supabase
       .from('withdrawal_requests')
-      .select('id, amount, purpose, status, requester_id, created_at, withdrawal_approvals(id, approver_id, decision)')
+      .select('id, amount, purpose, status, requester_id, created_at, withdrawal_approvals(id, approver_id, decision, reason)')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 
@@ -104,10 +111,18 @@ export default function WithdrawalsPage() {
   }
 
   async function handleDecision(withdrawalId: string, decision: 'approved' | 'rejected') {
+    let reason: string | null = null;
+
+    if (decision === 'rejected') {
+      reason = window.prompt('Optional: why are you rejecting this request?');
+      if (reason === null) return; // they clicked Cancel — don't submit anything
+    }
+
     const { error: decisionError } = await supabase.from('withdrawal_approvals').insert({
       withdrawal_id: withdrawalId,
       approver_id: userId,
       decision,
+      reason: reason || null,
     });
     if (decisionError) {
       alert(decisionError.message);
@@ -135,56 +150,69 @@ export default function WithdrawalsPage() {
 
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
+      <p style={{ marginBottom: 16 }}><a href={`/projects/${projectId}`}>← Back to project summary</a></p>
       <h1>Withdrawal requests</h1>
 
       {canRequest && (
-        <form onSubmit={handleCreateRequest} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
-          <h2>Request a withdrawal</h2>
-          <input type="number" min="1" placeholder="Amount (KES)" value={amount}
-            onChange={(e) => setAmount(e.target.value)} required />
-          <input type="text" placeholder="Purpose (e.g. Pay venue deposit)" value={purpose}
-            onChange={(e) => setPurpose(e.target.value)} required />
-          {error && <p style={{ color: 'red' }}>{error}</p>}
-          <button type="submit" disabled={loading}>
-            {loading ? 'Submitting...' : 'Submit request'}
-          </button>
-        </form>
+        <div className="card" style={{ marginTop: 20, marginBottom: 20 }}>
+          <h2 style={{ marginTop: 0 }}>Request a withdrawal</h2>
+          <form onSubmit={handleCreateRequest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <input type="number" min="1" placeholder="Amount (KES)" value={amount}
+              onChange={(e) => setAmount(e.target.value)} required />
+            <input type="text" placeholder="Purpose (e.g. Pay venue deposit)" value={purpose}
+              onChange={(e) => setPurpose(e.target.value)} required />
+            {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
+            <button type="submit" disabled={loading}>
+              {loading ? 'Submitting...' : 'Submit request'}
+            </button>
+          </form>
+        </div>
       )}
 
       <h2>All requests</h2>
       {requests.length === 0 && <p>No withdrawal requests yet.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {requests.map((r) => {
           const alreadyVoted = r.withdrawal_approvals.some((a) => a.approver_id === userId);
           const isRequester = r.requester_id === userId;
 
           return (
-            <li key={r.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 12 }}>
-              <strong>KES {r.amount.toLocaleString()}</strong> — {r.purpose}
-              <br />
-              Status: <strong>{r.status}</strong>
-              <ul>
-                {r.withdrawal_approvals.map((a) => (
-                  <li key={a.id}>{nameById[a.approver_id] ?? 'Unknown'}: {a.decision}</li>
-                ))}
-              </ul>
+            <div key={r.id} className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <strong>KES {r.amount.toLocaleString()}</strong>
+                <span style={{ color: statusColor(r.status), fontWeight: 600, fontSize: 13 }}>{r.status}</span>
+              </div>
+              <p style={{ margin: '6px 0' }}>{r.purpose}</p>
+              {r.withdrawal_approvals.length > 0 && (
+                <div className="muted-text" style={{ marginTop: 8 }}>
+                  {r.withdrawal_approvals.map((a) => (
+                    <div key={a.id} style={{ marginBottom: 4 }}>
+                      {nameById[a.approver_id] ?? 'Unknown'}: {a.decision}
+                      {a.reason && <div style={{ fontStyle: 'italic', marginLeft: 12 }}>&ldquo;{a.reason}&rdquo;</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
               {canApprove && !isRequester && !alreadyVoted && r.status === 'pending' && (
-                <div style={{ marginTop: 8 }}>
-                  <button onClick={() => handleDecision(r.id, 'approved')} style={{ marginRight: 8 }}>
-                    Approve
+                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                  <button onClick={() => handleDecision(r.id, 'approved')}>Approve</button>
+                  <button
+                    onClick={() => handleDecision(r.id, 'rejected')}
+                    style={{ background: 'var(--color-danger)' }}
+                  >
+                    Reject
                   </button>
-                  <button onClick={() => handleDecision(r.id, 'rejected')}>Reject</button>
                 </div>
               )}
               {isRequester && r.status === 'pending' && (
-                <p style={{ color: '#666', fontSize: 14, marginTop: 8 }}>
+                <p className="muted-text" style={{ marginTop: 8 }}>
                   You requested this — you cannot approve your own request.
                 </p>
               )}
-            </li>
+            </div>
           );
         })}
-      </ul>
+      </div>
     </main>
   );
 }

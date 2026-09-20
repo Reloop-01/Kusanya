@@ -59,27 +59,48 @@ export default function PublicProjectPage() {
 
   return (
     <main style={{ maxWidth: 480, margin: '60px auto', padding: 24 }}>
-      <h1>{project.title}</h1>
-      {project.purpose && <p>{project.purpose}</p>}
+      <div className="card">
+        <div className="card-stripe"><span></span><span></span></div>
+        <h1>{project.title}</h1>
+        {project.purpose && <p style={{ marginBottom: 20 }}>{project.purpose}</p>}
 
-      <div style={{ margin: '20px 0' }}>
-        <div style={{ background: '#eee', borderRadius: 8, height: 16, overflow: 'hidden' }}>
-          <div style={{ background: '#22a06b', height: '100%', width: `${percent}%` }} />
-        </div>
-        <p style={{ marginTop: 8 }}>
-          {project.currency} {total.toLocaleString()} raised of {project.currency}{' '}
-          {project.target_amount.toLocaleString()} ({percent}%)
+                {total >= project.target_amount ? (
+          <div style={{ background: 'var(--color-primary)', color: 'white', borderRadius: 10, padding: '14px 16px', marginBottom: 14, textAlign: 'center' }}>
+            <strong>🎉 Fully funded!</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 13, opacity: 0.9 }}>
+              {project.currency} {total.toLocaleString()} raised of {project.currency} {project.target_amount.toLocaleString()}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="progress-track">
+              <div className="progress-fill" style={{ width: `${percent}%` }} />
+            </div>
+            <p className="muted-text" style={{ marginBottom: 18 }}>
+              {project.currency} {total.toLocaleString()} raised of {project.currency}{' '}
+              {project.target_amount.toLocaleString()} ({percent}%)
+            </p>
+          </>
+        )}
+
+        <p className="muted-text" style={{ marginBottom: 4 }}>
+          {project.deadline && <>Deadline: {project.deadline} · </>}Status: {project.status}
         </p>
       </div>
 
-      {project.deadline && <p><strong>Deadline:</strong> {project.deadline}</p>}
-      <p><strong>Status:</strong> {project.status}</p>
-
       {project.payment_instructions && (
-        <div style={{ border: '2px solid #22a06b', borderRadius: 8, padding: 16, marginTop: 24, background: '#f4fbf8' }}>
-          <h2 style={{ marginTop: 0 }}>How to contribute</h2>
+        <div
+          style={{
+            border: `1px solid var(--color-primary)`,
+            background: 'var(--color-track)',
+            borderRadius: 10,
+            padding: 16,
+            marginTop: 20,
+          }}
+        >
+          <h2 style={{ marginTop: 0, color: 'var(--color-primary)' }}>How to contribute</h2>
           <p style={{ whiteSpace: 'pre-line' }}>{project.payment_instructions}</p>
-          <p style={{ fontSize: 13, color: '#666' }}>
+          <p className="muted-text" style={{ marginTop: 8 }}>
             After paying, let the organizer know so they can confirm your contribution.
           </p>
         </div>

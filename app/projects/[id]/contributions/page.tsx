@@ -11,7 +11,14 @@ type Contribution = {
   reference: string | null;
   status: string;
   created_at: string;
+  is_anonymous: boolean;
 };
+
+function statusColor(status: string) {
+  if (status === 'confirmed') return 'var(--color-primary)';
+  if (status === 'rejected') return 'var(--color-danger)';
+  return 'var(--color-accent)';
+}
 
 export default function ContributionsPage() {
   const params = useParams();
@@ -25,6 +32,7 @@ export default function ContributionsPage() {
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
+  const [isAnonymous, setIsAnonymous] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -57,7 +65,7 @@ export default function ContributionsPage() {
 
     const { data: contribs } = await supabase
       .from('contributions')
-      .select('id, contributor_name, amount, reference, status, created_at')
+      .select('id, contributor_name, amount, reference, status, created_at, is_anonymous')
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
     setContributions(contribs ?? []);
@@ -78,6 +86,7 @@ export default function ContributionsPage() {
       amount: Number(amount),
       reference: reference || null,
       status: 'pending',
+      is_anonymous: isAnonymous,
     });
 
     setLoading(false);
@@ -90,6 +99,7 @@ export default function ContributionsPage() {
     setName('');
     setAmount('');
     setReference('');
+    setIsAnonymous(false);
     loadData();
   }
 
@@ -114,44 +124,68 @@ export default function ContributionsPage() {
 
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
+      <p style={{ marginBottom: 16 }}><a href={`/projects/${projectId}`}>← Back to project summary</a></p>
       <h1>{projectTitle} — Contributions</h1>
 
-      <h2>Record a contribution</h2>
-      <form onSubmit={handleAddContribution} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 32 }}>
-        <input type="text" placeholder="Contributor name" value={name}
-          onChange={(e) => setName(e.target.value)} required />
-        <input type="number" min="1" placeholder="Amount (KES)" value={amount}
-          onChange={(e) => setAmount(e.target.value)} required />
-        <input type="text" placeholder="Reference / M-Pesa code (optional)" value={reference}
-          onChange={(e) => setReference(e.target.value)} />
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit" disabled={loading}>
-          {loading ? 'Saving...' : 'Add contribution'}
-        </button>
-      </form>
+      <div className="card" style={{ marginTop: 20, marginBottom: 20 }}>
+        <h2 style={{ marginTop: 0 }}>Record a contribution</h2>
+        <form onSubmit={handleAddContribution} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <input type="text" placeholder="Contributor name" value={name}
+            onChange={(e) => setName(e.target.value)} required />
+          <input type="number" min="1" placeholder="Amount (KES)" value={amount}
+            onChange={(e) => setAmount(e.target.value)} required />
+          <input type="text" placeholder="Reference / M-Pesa code (optional)" value={reference}
+            onChange={(e) => setReference(e.target.value)} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+            <input type="checkbox" checked={isAnonymous}
+              onChange={(e) => setIsAnonymous(e.target.checked)} style={{ width: 'auto' }} />
+            This contributor wishes to remain anonymous
+          </label>
+          {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
+          <button type="submit" disabled={loading}>
+            {loading ? 'Saving...' : 'Add contribution'}
+          </button>
+        </form>
+      </div>
 
       <h2>All contributions</h2>
       {contributions.length === 0 && <p>No contributions recorded yet.</p>}
-      <ul style={{ listStyle: 'none', padding: 0 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {contributions.map((c) => (
-          <li key={c.id} style={{ border: '1px solid #ddd', borderRadius: 8, padding: 12, marginBottom: 8 }}>
-            <strong>{c.contributor_name}</strong> — KES {c.amount.toLocaleString()}
-            {c.reference && <> (ref: {c.reference})</>}
-            <br />
-            Status: <strong>{c.status}</strong>
+          <div key={c.id} className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <strong>
+                {c.contributor_name}
+                {c.is_anonymous && (
+                  <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--color-accent)', fontWeight: 600 }}>
+                    ANONYMOUS
+                  </span>
+                )}
+              </strong>
+              <span style={{ color: statusColor(c.status), fontWeight: 600, fontSize: 13 }}>{c.status}</span>
+            </div>
+            <p className="muted-text" style={{ margin: '6px 0' }}>
+              KES {c.amount.toLocaleString()}{c.reference && <> · ref: {c.reference}</>}
+            </p>
+            {c.is_anonymous && (
+              <p className="muted-text" style={{ fontSize: 12, fontStyle: 'italic' }}>
+                Visible to you for reconciliation only — don&apos;t name them publicly.
+              </p>
+            )}
             {c.status === 'pending' && (
-              <div style={{ marginTop: 8 }}>
-                <button onClick={() => updateStatus(c.id, 'confirmed')} style={{ marginRight: 8 }}>
-                  Confirm
+              <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                <button onClick={() => updateStatus(c.id, 'confirmed')}>Confirm</button>
+                <button
+                  onClick={() => updateStatus(c.id, 'rejected')}
+                  style={{ background: 'var(--color-danger)' }}
+                >
+                  Reject
                 </button>
-                <button onClick={() => updateStatus(c.id, 'rejected')}>Reject</button>
               </div>
             )}
-          </li>
+          </div>
         ))}
-      </ul>
-
-      <p style={{ marginTop: 24 }}><a href={`/projects/${projectId}`}>← Back to project summary</a></p>
+      </div>
     </main>
   );
 }
