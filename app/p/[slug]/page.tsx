@@ -21,6 +21,7 @@ export default function PublicProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [total, setTotal] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [isMember, setIsMember] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -36,6 +37,17 @@ export default function PublicProjectPage() {
         project_slug: slug,
       });
       setTotal(totalData ?? 0);
+
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData.user && data) {
+        const { data: membership } = await supabase
+          .from('project_members')
+          .select('role')
+          .eq('project_id', data.id)
+          .eq('user_id', userData.user.id)
+          .maybeSingle();
+        setIsMember(!!membership);
+      }
 
       setLoading(false);
     }
@@ -61,6 +73,11 @@ export default function PublicProjectPage() {
     <main style={{ maxWidth: 480, margin: '60px auto', padding: 24 }}>
       <div className="card">
         <div className="card-stripe"><span></span><span></span></div>
+        {isMember && (
+          <p style={{ marginBottom: 12 }}>
+            <a href={`/projects/${project.id}`}>You&apos;re a member — go to the full project →</a>
+          </p>
+        )}
         <h1>{project.title}</h1>
         {project.purpose && <p style={{ marginBottom: 20 }}>{project.purpose}</p>}
 

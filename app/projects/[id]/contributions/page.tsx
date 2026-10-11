@@ -28,6 +28,7 @@ export default function ContributionsPage() {
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [hasAccess, setHasAccess] = useState(false);
   const [projectTitle, setProjectTitle] = useState('');
+  const [projectStatus, setProjectStatus] = useState('active');
   const [contributions, setContributions] = useState<Contribution[]>([]);
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
@@ -58,10 +59,11 @@ export default function ContributionsPage() {
 
     const { data: project } = await supabase
       .from('projects')
-      .select('title')
+      .select('title, status')
       .eq('id', projectId)
       .single();
     setProjectTitle(project?.title ?? '');
+    setProjectStatus(project?.status ?? 'active');
 
     const { data: contribs } = await supabase
       .from('contributions')
@@ -122,6 +124,8 @@ export default function ContributionsPage() {
     );
   }
 
+  const isActive = projectStatus === 'active';
+
   return (
     <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
       <p style={{ marginBottom: 16 }}><a href={`/projects/${projectId}`}>← Back to project summary</a></p>
@@ -129,23 +133,29 @@ export default function ContributionsPage() {
 
       <div className="card" style={{ marginTop: 20, marginBottom: 20 }}>
         <h2 style={{ marginTop: 0 }}>Record a contribution</h2>
-        <form onSubmit={handleAddContribution} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <input type="text" placeholder="Contributor name" value={name}
-            onChange={(e) => setName(e.target.value)} required />
-          <input type="number" min="1" placeholder="Amount (KES)" value={amount}
-            onChange={(e) => setAmount(e.target.value)} required />
-          <input type="text" placeholder="Reference / M-Pesa code (optional)" value={reference}
-            onChange={(e) => setReference(e.target.value)} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
-            <input type="checkbox" checked={isAnonymous}
-              onChange={(e) => setIsAnonymous(e.target.checked)} style={{ width: 'auto' }} />
-            This contributor wishes to remain anonymous
-          </label>
-          {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
-          <button type="submit" disabled={loading}>
-            {loading ? 'Saving...' : 'Add contribution'}
-          </button>
-        </form>
+        {isActive ? (
+          <form onSubmit={handleAddContribution} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <input type="text" placeholder="Contributor name" value={name}
+              onChange={(e) => setName(e.target.value)} required />
+            <input type="number" min="1" placeholder="Amount (KES)" value={amount}
+              onChange={(e) => setAmount(e.target.value)} required />
+            <input type="text" placeholder="Reference / M-Pesa code (optional)" value={reference}
+              onChange={(e) => setReference(e.target.value)} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+              <input type="checkbox" checked={isAnonymous}
+                onChange={(e) => setIsAnonymous(e.target.checked)} style={{ width: 'auto' }} />
+              This contributor wishes to remain anonymous
+            </label>
+            {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
+            <button type="submit" disabled={loading}>
+              {loading ? 'Saving...' : 'Add contribution'}
+            </button>
+          </form>
+        ) : (
+          <p className="muted-text">
+            This project is {projectStatus} and no longer accepting new contributions.
+          </p>
+        )}
       </div>
 
       <h2>All contributions</h2>

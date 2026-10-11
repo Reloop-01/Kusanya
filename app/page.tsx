@@ -1,4 +1,21 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+
 export default function HomePage() {
+  const [checking, setChecking] = useState(true);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setIsLoggedIn(!!data.user);
+      setChecking(false);
+    });
+  }, []);
+
+  const primaryCtaHref = isLoggedIn ? '/projects/new' : '/signup';
+
   return (
     <main style={{ maxWidth: 720, margin: '0 auto', padding: '24px' }}>
       <nav style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0', flexWrap: 'wrap', gap: 12 }}>
@@ -6,8 +23,14 @@ export default function HomePage() {
           Kusanya
         </span>
         <div style={{ display: 'flex', gap: 20, alignItems: 'center' }}>
-          <a href="/login">Log in</a>
-          <a href="/signup"><button>Sign up</button></a>
+          {!checking && isLoggedIn ? (
+            <a href="/dashboard"><button>Go to Home</button></a>
+          ) : (
+            <>
+              <a href="/login">Log in</a>
+              <a href="/signup"><button>Sign up</button></a>
+            </>
+          )}
         </div>
       </nav>
 
@@ -27,7 +50,7 @@ export default function HomePage() {
         </p>
 
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
-          <a href="/signup"><button style={{ padding: '12px 24px', fontSize: 15 }}>Start a project</button></a>
+          <a href={primaryCtaHref}><button style={{ padding: '12px 24px', fontSize: 15 }}>Start a project</button></a>
           <a href="/discover">
             <button style={{ padding: '12px 24px', fontSize: 15, background: 'transparent', color: 'var(--color-primary)', border: '1px solid var(--color-primary)' }}>
               Discover public projects
@@ -36,7 +59,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '32px 0 48px' }}>
+      <section id="how-it-works" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 16, padding: '32px 0 48px' }}>
         <div className="card">
           <div className="card-label"><span>Step 1</span></div>
           <h2 style={{ marginTop: 0, fontSize: 15 }}>Create a project</h2>
@@ -53,6 +76,12 @@ export default function HomePage() {
           <p className="muted-text">Withdrawals need real approval from your team — never just one person&apos;s word.</p>
         </div>
       </section>
+
+      {!checking && isLoggedIn && (
+        <p style={{ textAlign: 'center', marginBottom: 24 }}>
+          <a href="/dashboard">← Back to Home</a>
+        </p>
+      )}
 
       <footer style={{ borderTop: '1px solid var(--color-track)', padding: '20px 0', textAlign: 'center' }}>
         <p className="muted-text">Kusanya — built for groups that trust each other.</p>

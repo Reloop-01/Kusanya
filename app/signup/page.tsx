@@ -1,9 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
 export default function SignUpPage() {
+  const searchParams = useSearchParams();
+  const inviteToken = searchParams.get('invite');
+
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -11,6 +15,17 @@ export default function SignUpPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [inviteInfo, setInviteInfo] = useState<{ project_title: string; role: string } | null>(null);
+
+  useEffect(() => {
+    if (!inviteToken) return;
+    supabase
+      .rpc('get_invite_details', { p_token: inviteToken })
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) setInviteInfo(data as any);
+      });
+  }, [inviteToken]);
 
   async function handleSignUp(e: React.FormEvent) {
     e.preventDefault();
@@ -21,7 +36,7 @@ export default function SignUpPage() {
       email,
       password,
       options: {
-        data: { full_name: fullName, phone: phone },
+        data: { full_name: fullName, phone: phone, invite_token: inviteToken ?? undefined },
       },
     });
 
@@ -40,6 +55,11 @@ export default function SignUpPage() {
           <div className="card-stripe"><span></span><span></span></div>
           <h1>Check your email</h1>
           <p>We&apos;ve sent a confirmation link. Click it, then come back and log in.</p>
+          {inviteInfo && (
+            <p className="muted-text" style={{ marginTop: 12 }}>
+              Once confirmed, you&apos;ll automatically join &ldquo;{inviteInfo.project_title}&rdquo; as {inviteInfo.role}.
+            </p>
+          )}
         </div>
       </main>
     );
@@ -50,7 +70,13 @@ export default function SignUpPage() {
       <div className="card">
         <div className="card-stripe"><span></span><span></span></div>
         <h1>Create your account</h1>
-        <p className="muted-text" style={{ marginBottom: 20 }}>Start coordinating your group&apos;s funds.</p>
+        {inviteInfo ? (
+          <p className="muted-text" style={{ marginBottom: 20 }}>
+            You&apos;ve been invited to join &ldquo;{inviteInfo.project_title}&rdquo; as {inviteInfo.role}. Sign up to accept.
+          </p>
+        ) : (
+          <p className="muted-text" style={{ marginBottom: 20 }}>Start coordinating your group&apos;s funds.</p>
+        )}
         <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <input type="text" placeholder="Full name" value={fullName}
             onChange={(e) => setFullName(e.target.value)} required />

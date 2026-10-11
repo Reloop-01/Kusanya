@@ -14,6 +14,7 @@ type ProjectInfo = {
   status: string;
   slug: string;
   payment_instructions: string | null;
+  visibility: string;
 };
 
 export default function ProjectHubPage() {
@@ -49,7 +50,7 @@ export default function ProjectHubPage() {
 
     const { data: projectData } = await supabase
       .from('projects')
-      .select('title, purpose, target_amount, currency, deadline, status, slug, payment_instructions')
+      .select('title, purpose, target_amount, currency, deadline, status, slug, payment_instructions, visibility')
       .eq('id', projectId)
       .single();
     setProject(projectData);
@@ -95,8 +96,9 @@ export default function ProjectHubPage() {
 
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-stripe"><span></span><span></span></div>
-        <div className="card-label">
+        <div className="card-label" style={{ justifyContent: 'space-between' }}>
           <span>Your role: {myRole}</span>
+          <span>{project.visibility === 'public' ? 'Public' : project.visibility === 'private' ? 'Private' : 'Link-only'}</span>
         </div>
         <h1>{project.title}</h1>
         {project.purpose && <p style={{ marginBottom: 18 }}>{project.purpose}</p>}
@@ -181,8 +183,11 @@ export default function ProjectHubPage() {
         <a href={`/projects/${projectId}/settings`}>
           <button style={{ width: '100%' }}>Team & approval settings</button>
         </a>
-        <a href={`/projects/${projectId}/withdrawals`}>
+                <a href={`/projects/${projectId}/withdrawals`}>
           <button style={{ width: '100%' }}>Withdrawal requests</button>
+        </a>
+        <a href={`/projects/${projectId}/activity`}>
+          <button style={{ width: '100%' }}>Activity</button>
         </a>
       </div>
     </main>

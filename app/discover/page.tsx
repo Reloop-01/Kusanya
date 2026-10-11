@@ -45,7 +45,7 @@ export default function DiscoverPage() {
 
   return (
         <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
-      <p style={{ marginBottom: 16 }}><a href="/dashboard">← Back to dashboard</a></p>
+      <p style={{ marginBottom: 16 }}><a href="/">← Back to home</a></p>
       <h1>Discover public projects</h1>
       <p className="muted-text" style={{ marginBottom: 24 }}>Community fundraisers anyone can support.</p>
 
