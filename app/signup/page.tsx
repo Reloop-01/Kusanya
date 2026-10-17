@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 
-export default function SignUpPage() {
+function SignUpForm() {
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get('invite');
 
@@ -94,5 +94,19 @@ export default function SignUpPage() {
         <p className="muted-text" style={{ marginTop: 16 }}>Already have an account? <a href="/login">Log in</a></p>
       </div>
     </main>
+  );
+}
+
+export default function SignUpPage() {
+  return (
+    <Suspense
+      fallback={
+        <main style={{ maxWidth: 380, margin: '100px auto', padding: 24 }}>
+          <p>Loading...</p>
+        </main>
+      }
+    >
+      <SignUpForm />
+    </Suspense>
   );
 }
