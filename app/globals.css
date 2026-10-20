@@ -1,4 +1,5 @@
 @import "tailwindcss";
+
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -8,19 +9,64 @@ html, body {
   overflow-x: hidden;
 }
 
-body {
-  overflow-wrap: break-word;
-}
 :root {
-  --color-bg: #FBFAF7;
+  color-scheme: light;
+  --color-bg: #FFFFFF;
   --color-surface: #FFFFFF;
-  --color-ink: #1F2A28;
-  --color-muted: #4C7A72;
-  --color-primary: #008575;
-  --color-primary-dark: #006B5F;
-  --color-accent: #f36f2b;
-  --color-track: #DCEEE9;
+  --color-ink: #0B2B27;
+  --color-muted: #44655E;
+  --color-primary: #0B5D55;
+  --color-primary-dark: #084A44;
+  --color-on-primary: #FFFFFF;
+  --color-accent: #F26B21;
+  --color-track: #E3F1EC;
+  --color-input-border: #BFD9D1;
   --color-danger: #B84C3E;
+  --color-shadow: rgba(11, 43, 39, 0.12);
+
+  --color-hero: #0B5D55;
+  --color-hero-sub: #BFE3DC;
+  --color-hill-1: #0F7066;
+  --color-hill-2: #094A44;
+
+  --tile-mint-bg: #DDF1EA;
+  --tile-mint-ic: #0B5D55;
+  --tile-sand-bg: #FCEBCB;
+  --tile-sand-ic: #8A4B00;
+  --tile-peach-bg: #FDDFD0;
+  --tile-peach-ic: #A63D12;
+  --tile-sky-bg: #DCEBF7;
+  --tile-sky-ic: #1F5F8B;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #07211E;
+  --color-surface: #0F2D29;
+  --color-ink: #E8F4F1;
+  --color-muted: #8DBDB4;
+  --color-primary: #2BC4B0;
+  --color-primary-dark: #22A896;
+  --color-on-primary: #04201C;
+  --color-accent: #FF8A3D;
+  --color-track: #1B4A43;
+  --color-input-border: #2B5F56;
+  --color-danger: #FF8F80;
+  --color-shadow: rgba(0, 0, 0, 0.4);
+
+  --color-hero: #0E3F39;
+  --color-hero-sub: #9FCFC6;
+  --color-hill-1: #15564D;
+  --color-hill-2: #0A302C;
+
+  --tile-mint-bg: #12332E;
+  --tile-mint-ic: #5EE0CC;
+  --tile-sand-bg: #2E2614;
+  --tile-sand-ic: #F7B24A;
+  --tile-peach-bg: #32201A;
+  --tile-peach-ic: #FF8F6B;
+  --tile-sky-bg: #16293A;
+  --tile-sky-ic: #7CC4F5;
 }
 
 body {
@@ -28,6 +74,7 @@ body {
   color: var(--color-ink);
   font-family: var(--font-body), sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-wrap: break-word;
 }
 
 h1, h2, h3 {
@@ -36,7 +83,7 @@ h1, h2, h3 {
   line-height: 1.2;
 }
 
-h1 { font-size: 1.5rem; color: var(--color-primary); margin-bottom: 0.5rem; }
+h1 { font-size: 1.5rem; color: var(--color-ink); margin-bottom: 0.5rem; }
 h2 { font-size: 1.05rem; color: var(--color-ink); margin-top: 2rem; margin-bottom: 0.75rem; }
 
 a { color: var(--color-primary); text-decoration: none; }
@@ -44,8 +91,8 @@ a:hover { text-decoration: underline; }
 
 input, textarea, select {
   font-family: var(--font-body), sans-serif;
-  border: 0.5px solid var(--color-track);
-  border-radius: 10px;
+  border: 1px solid var(--color-input-border);
+  border-radius: 12px;
   padding: 10px 12px;
   background: var(--color-surface);
   color: var(--color-ink);
@@ -60,13 +107,13 @@ input:focus, textarea:focus, select:focus {
 
 button {
   font-family: var(--font-body), sans-serif;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 0.9rem;
-  padding: 10px 16px;
-  border-radius: 10px;
+  padding: 12px 20px;
+  border-radius: 999px;
   border: none;
   background: var(--color-primary);
-  color: white;
+  color: var(--color-on-primary);
   cursor: pointer;
 }
 
@@ -75,8 +122,9 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .card {
   background: var(--color-surface);
-  border-radius: 10px;
-  border: 0.5px solid var(--color-track);
+  border-radius: 16px;
+  border: 1px solid var(--color-track);
+  box-shadow: 0 6px 20px var(--color-shadow);
   padding: 16px;
   position: relative;
   overflow: hidden;

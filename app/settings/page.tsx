@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { getThemePreference, setThemePreference, type ThemePreference } from '@/lib/theme';
+
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 export default function AccountSettingsPage() {
   const router = useRouter();
@@ -17,8 +24,11 @@ export default function AccountSettingsPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [photoError, setPhotoError] = useState('');
+  const [themePref, setThemePref] = useState<ThemePreference>('system');
 
   useEffect(() => {
+    setThemePref(getThemePreference());
+
     async function load() {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData.user) {
@@ -41,6 +51,11 @@ export default function AccountSettingsPage() {
     }
     load();
   }, [router]);
+
+  function chooseTheme(pref: ThemePreference) {
+    setThemePref(pref);
+    setThemePreference(pref);
+  }
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -84,7 +99,6 @@ export default function AccountSettingsPage() {
     }
 
     const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
-    // Add a changing query string so the browser doesn't keep showing a cached old photo
     const freshUrl = `${urlData.publicUrl}?t=${Date.now()}`;
 
     const { error: updateError } = await supabase
@@ -114,7 +128,7 @@ export default function AccountSettingsPage() {
     <main style={{ maxWidth: 480, margin: '60px auto', padding: 24 }}>
       <p style={{ marginBottom: 16 }}><a href="/dashboard">← Back to home</a></p>
 
-      <div className="card">
+      <div className="card" style={{ marginBottom: 20 }}>
         <h1>Account settings</h1>
         <p className="muted-text" style={{ marginBottom: 20 }}>{email}</p>
 
@@ -165,6 +179,34 @@ export default function AccountSettingsPage() {
           </button>
           {saved && <span style={{ color: 'var(--color-primary)', fontSize: 13 }}>Saved!</span>}
         </form>
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Appearance</h2>
+        <p className="muted-text" style={{ marginBottom: 12 }}>
+          System follows your phone or computer&apos;s own light/dark setting.
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {THEME_OPTIONS.map((opt) => {
+            const selected = themePref === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => chooseTheme(opt.value)}
+                style={{
+                  flex: 1,
+                  background: selected ? 'var(--color-primary)' : 'transparent',
+                  color: selected ? 'var(--color-on-primary)' : 'var(--color-ink)',
+                  border: '1px solid var(--color-input-border)',
+                }}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </main>
   );

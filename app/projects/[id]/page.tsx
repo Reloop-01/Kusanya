@@ -104,7 +104,7 @@ export default function ProjectHubPage() {
         {project.purpose && <p style={{ marginBottom: 18 }}>{project.purpose}</p>}
 
         {isFullyFunded ? (
-          <div style={{ background: 'var(--color-primary)', color: 'white', borderRadius: 10, padding: '14px 16px', marginBottom: 14, textAlign: 'center' }}>
+          <div style={{ background: 'var(--color-primary)', color: 'var(--color-on-primary)', borderRadius: 10, padding: '14px 16px', marginBottom: 14, textAlign: 'center' }}>
             <strong>🎉 Fully funded!</strong>
             <p style={{ margin: '4px 0 0', fontSize: 13, opacity: 0.9 }}>
               {project.currency} {total.toLocaleString()} raised of {project.currency} {project.target_amount.toLocaleString()}
