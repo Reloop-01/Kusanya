@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { authFetch } from '@/lib/authFetch';
 import Avatar from '@/components/Avatar';
 
 type Member = {
@@ -165,11 +166,7 @@ export default function ProjectSettingsPage() {
 
     if (previousStatus !== status && (status === 'completed' || status === 'cancelled')) {
       try {
-        await fetch('/api/notify-project-closed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId, projectTitle: title, status }),
-        });
+        await authFetch('/api/notify-project-closed', { projectId });
       } catch (notifyError) {
         console.error('Failed to notify members of closure:', notifyError);
       }
@@ -213,16 +210,9 @@ export default function ProjectSettingsPage() {
     }
 
     try {
-      await fetch('/api/notify-member-added', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toEmail: email,
-          toName: (found as any).full_name,
-          projectTitle: title,
-          role,
-          projectUrl: `${window.location.origin}/projects/${projectId}`,
-        }),
+      await authFetch('/api/notify-member-added', {
+        projectId,
+        memberUserId: (found as any).id,
       });
     } catch (notifyError) {
       console.error('Failed to notify new member:', notifyError);
@@ -257,16 +247,7 @@ export default function ProjectSettingsPage() {
     }
 
     try {
-      await fetch('/api/send-invite', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toEmail: notFoundEmail,
-          projectTitle: title,
-          role: notFoundRole,
-          signupUrl: `${window.location.origin}/signup?invite=${invite.token}`,
-        }),
-      });
+      await authFetch('/api/send-invite', { inviteToken: invite.token });
     } catch (sendError) {
       console.error('Failed to send invite email:', sendError);
     }

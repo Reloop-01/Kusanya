@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
 import ThemeSync from "@/components/ThemeSync";
+import TabBar from "@/components/TabBar";
 import "./globals.css";
 
 const bricolage = Bricolage_Grotesque({
@@ -39,6 +40,7 @@ export default function RootLayout({
       <body className={`${bricolage.variable} ${jakarta.variable}`}>
         <ThemeSync />
         {children}
+        <TabBar />
       </body>
     </html>
   );

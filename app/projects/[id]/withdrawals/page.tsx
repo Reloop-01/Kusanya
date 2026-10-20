@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { authFetch } from '@/lib/authFetch';
 import Avatar from '@/components/Avatar';
 
 type Approval = {
@@ -178,13 +179,17 @@ export default function WithdrawalsPage() {
     setError('');
     setLoading(true);
 
-    const { error: insertError } = await supabase.from('withdrawal_requests').insert({
-      project_id: projectId,
-      requester_id: userId,
-      amount: Number(amount),
-      purpose,
-      status: 'pending',
-    });
+    const { data: inserted, error: insertError } = await supabase
+      .from('withdrawal_requests')
+      .insert({
+        project_id: projectId,
+        requester_id: userId,
+        amount: Number(amount),
+        purpose,
+        status: 'pending',
+      })
+      .select('id')
+      .single();
 
     if (insertError) {
       setLoading(false);
@@ -193,11 +198,9 @@ export default function WithdrawalsPage() {
     }
 
     try {
-      await fetch('/api/notify-approvers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, requesterId: userId, amount: Number(amount), purpose }),
-      });
+      if (inserted) {
+        await authFetch('/api/notify-approvers', { withdrawalId: inserted.id });
+      }
     } catch (notifyError) {
       console.error('Failed to send approver notifications:', notifyError);
     }
