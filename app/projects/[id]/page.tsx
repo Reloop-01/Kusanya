@@ -4,6 +4,14 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { QRCodeSVG } from 'qrcode.react';
+import {
+  FundingRing,
+  MilestoneTrack,
+  capitalize,
+  daysLeftLabel,
+  formatDeadline,
+} from '@/components/ProjectProgress';
+import MaterialsGallery from '@/components/MaterialsGallery';
 
 type ProjectInfo = {
   title: string;
@@ -22,8 +30,6 @@ type Supporter = {
   initials: string | null; // null = anonymous (shown as a plain circle)
 };
 
-const MILESTONES = [25, 50, 75, 100];
-
 // Only these roles can see who the supporters are.
 // (The database rules still decide what is actually returned.)
 const LEDGER_ROLES = ['organizer', 'administrator', 'auditor'];
@@ -35,91 +41,11 @@ const AVATAR_TONES = [
   { bg: 'var(--tile-mint-bg)', ink: 'var(--tile-mint-ic)' },
 ];
 
-function capitalize(text: string) {
-  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
-}
-
 function initialsOf(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-// Turns "2026-10-31" into a local date (no time-zone surprises).
-function parseDeadline(deadline: string): Date | null {
-  const [y, m, d] = deadline.slice(0, 10).split('-').map(Number);
-  if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
-}
-
-function daysLeftLabel(deadline: string): string | null {
-  const date = parseDeadline(deadline);
-  if (!date) return null;
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const diff = Math.round((date.getTime() - startOfToday.getTime()) / 86400000);
-  if (diff < 0) return 'Deadline passed';
-  if (diff === 0) return 'Last day';
-  if (diff === 1) return '1 day left';
-  return `${diff} days left`;
-}
-
-function formatDeadline(deadline: string): string {
-  const date = parseDeadline(deadline);
-  if (!date) return deadline;
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function FundingRing({ percent }: { percent: number }) {
-  const radius = 54;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <svg
-      width="132"
-      height="132"
-      viewBox="0 0 132 132"
-      role="img"
-      aria-label={`${percent} percent funded`}
-      style={{ display: 'block', margin: '0 auto' }}
-    >
-      <circle cx="66" cy="66" r={radius} fill="none" stroke="var(--color-track)" strokeWidth="10" />
-      {percent > 0 && (
-        <circle
-          cx="66"
-          cy="66"
-          r={radius}
-          fill="none"
-          stroke="var(--color-accent)"
-          strokeWidth="10"
-          strokeLinecap="round"
-          strokeDasharray={`${(percent / 100) * circumference} ${circumference}`}
-          transform="rotate(-90 66 66)"
-        />
-      )}
-      <text
-        x="66"
-        y="68"
-        textAnchor="middle"
-        fontSize="30"
-        fontWeight="700"
-        fill="var(--color-ink)"
-        style={{ fontFamily: 'var(--font-heading), sans-serif' }}
-      >
-        {percent}%
-      </text>
-      <text
-        x="66"
-        y="88"
-        textAnchor="middle"
-        fontSize="12"
-        fill="var(--color-muted)"
-        style={{ fontFamily: 'var(--font-body), sans-serif' }}
-      >
-        {percent >= 100 ? 'fully funded' : 'funded'}
-      </text>
-    </svg>
-  );
 }
 
 function RowLink({ href, label }: { href: string; label: string }) {
@@ -333,7 +259,6 @@ export default function ProjectHubPage() {
   const showContribute = isActive && (hasPaymentInstructions || canRecordContributions);
   const showShare = !isPrivate;
 
-  const milestoneFill = Math.max(0, Math.min(75, percent - 25));
   const visibleSupporters = supporters.slice(0, 3);
   const extraSupporters = Math.max(0, supporters.length - 3);
 
@@ -445,55 +370,7 @@ export default function ProjectHubPage() {
             </div>
           )}
 
-          {/* Milestones */}
-          <div style={{ position: 'relative', margin: '16px 0 14px' }}>
-            <div
-              style={{
-                position: 'absolute',
-                top: 11,
-                left: '12.5%',
-                right: '12.5%',
-                height: 3,
-                background: 'var(--color-track)',
-              }}
-            />
-            <div
-              style={{
-                position: 'absolute',
-                top: 11,
-                left: '12.5%',
-                width: `${milestoneFill}%`,
-                height: 3,
-                background: 'var(--color-primary)',
-              }}
-            />
-            <div style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)' }}>
-              {MILESTONES.map((m) => {
-                const reached = percent >= m;
-                return (
-                  <div key={m} title={reached ? `${m}% reached` : `${m}% not reached yet`}>
-                    <div
-                      style={{
-                        width: 24,
-                        height: 24,
-                        boxSizing: 'border-box',
-                        margin: '0 auto 4px',
-                        borderRadius: '50%',
-                        background: reached ? 'var(--color-primary)' : 'var(--color-surface)',
-                        border: reached ? 'none' : '2px solid var(--color-input-border)',
-                        color: 'var(--color-on-primary)',
-                        fontSize: 13,
-                        lineHeight: '24px',
-                      }}
-                    >
-                      {reached ? '✓' : ''}
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>{m}%</div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <MilestoneTrack percent={percent} />
 
           {/* Supporters + days-left chip */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -623,17 +500,20 @@ export default function ProjectHubPage() {
 
         {/* ---------- ABOUT ---------- */}
         {project.purpose && (
-          <p style={{ marginTop: 18, fontSize: 14, lineHeight: 1.5, color: 'var(--color-ink)' }}>
+          <p style={{ marginTop: 18, fontSize: 14, lineHeight: 1.6, color: 'var(--color-ink)', whiteSpace: 'pre-line' }}>
             {project.purpose}
           </p>
         )}
+
+        {/* ---------- MATERIALS (photos, videos, PDFs) ---------- */}
+        <MaterialsGallery projectId={projectId} />
 
         {/* ---------- HOW TO CONTRIBUTE ---------- */}
         {project.payment_instructions ? (
           <div
             id="how-to-contribute"
             style={{
-              marginTop: 16,
+              marginTop: 22,
               background: 'var(--tile-mint-bg)',
               borderRadius: 16,
               padding: 14,
@@ -690,6 +570,9 @@ export default function ProjectHubPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>
           {canRecordContributions && (
             <RowLink href={`/projects/${projectId}/contributions`} label="Record a contribution" />
+          )}
+          {isOrganizer && (
+            <RowLink href={`/projects/${projectId}/materials`} label="Project materials (photos, videos, PDFs)" />
           )}
           <RowLink href={`/projects/${projectId}/settings`} label="Team & approval settings" />
           <RowLink href={`/projects/${projectId}/withdrawals`} label="Withdrawal requests" />

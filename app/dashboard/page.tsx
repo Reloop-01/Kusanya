@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import Avatar from '@/components/Avatar';
 
 // Projects with these statuses are finished, so they are not "active".
 const CLOSED_STATUSES = ['completed', 'cancelled'];
+
+// The most projects the carousel will show.
+const CAROUSEL_LIMIT = 6;
 
 type ProjectWithTotal = {
   id: string;
@@ -144,6 +147,178 @@ function ProgressRing({ percent }: { percent: number }) {
   );
 }
 
+// How far one slide is from the next (slide width plus the gap between slides).
+function slideStep(scroller: HTMLDivElement): number {
+  const first = scroller.children[0] as HTMLElement | undefined;
+  const second = scroller.children[1] as HTMLElement | undefined;
+  if (first && second) return Math.max(1, second.offsetLeft - first.offsetLeft);
+  return Math.max(1, scroller.clientWidth);
+}
+
+function ProjectCarousel({
+  projects,
+  activeIndex,
+  onIndexChange,
+}: {
+  projects: ProjectWithTotal[];
+  activeIndex: number;
+  onIndexChange: (index: number) => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const pausedRef = useRef(false);
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Move to the next project every few seconds (skipped for people who prefer reduced motion).
+  useEffect(() => {
+    if (projects.length < 2) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    const timer = setInterval(() => {
+      const scroller = scrollerRef.current;
+      if (!scroller || pausedRef.current) return;
+      const step = slideStep(scroller);
+      const current = Math.round(scroller.scrollLeft / step);
+      const next = (current + 1) % projects.length;
+      scroller.scrollTo({ left: next * step, behavior: 'smooth' });
+    }, 4500);
+
+    return () => clearInterval(timer);
+  }, [projects.length]);
+
+  useEffect(() => {
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    };
+  }, []);
+
+  function pause() {
+    pausedRef.current = true;
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+  }
+
+  function resumeSoon() {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => {
+      pausedRef.current = false;
+    }, 6000);
+  }
+
+  function handleScroll() {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    const step = slideStep(scroller);
+    const index = Math.min(projects.length - 1, Math.max(0, Math.round(scroller.scrollLeft / step)));
+    if (index !== activeIndex) onIndexChange(index);
+  }
+
+  function goTo(index: number) {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    pause();
+    scroller.scrollTo({ left: index * slideStep(scroller), behavior: 'smooth' });
+    resumeSoon();
+  }
+
+  return (
+    <div>
+      <div
+        ref={scrollerRef}
+        className="k-carousel"
+        onScroll={handleScroll}
+        onMouseEnter={pause}
+        onMouseLeave={resumeSoon}
+        onTouchStart={pause}
+        onTouchEnd={resumeSoon}
+        onFocus={pause}
+        onBlur={resumeSoon}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          gap: 12,
+          overflowX: 'auto',
+          scrollSnapType: 'x mandatory',
+          padding: '2px 2px 14px',
+        }}
+      >
+        {projects.map((project) => {
+          const percent =
+            project.target_amount > 0
+              ? Math.min(100, Math.round((project.total / project.target_amount) * 100))
+              : 0;
+          return (
+            <a
+              key={project.id}
+              href={`/projects/${project.id}`}
+              className="card"
+              style={{
+                flex: '0 0 100%',
+                scrollSnapAlign: 'start',
+                display: 'block',
+                boxSizing: 'border-box',
+                color: 'var(--color-ink)',
+                textDecoration: 'none',
+                borderRadius: 20,
+                boxShadow: '0 10px 30px var(--color-shadow)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-heading), sans-serif',
+                      fontWeight: 700,
+                      fontSize: 19,
+                    }}
+                  >
+                    {project.title}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--color-muted)', marginTop: 2 }}>
+                    KES {project.total.toLocaleString()} of {project.target_amount.toLocaleString()}
+                  </div>
+                </div>
+                <div style={{ flexShrink: 0 }}>
+                  <ProgressRing percent={percent} />
+                </div>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+
+      {projects.length > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 2, marginTop: -4 }}>
+          {projects.map((project, i) => (
+            <button
+              key={project.id}
+              onClick={() => goTo(i)}
+              aria-label={`Show project ${i + 1} of ${projects.length}`}
+              style={{
+                padding: 0,
+                width: 20,
+                height: 20,
+                background: 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <span
+                style={{
+                  display: 'block',
+                  height: 8,
+                  width: i === activeIndex ? 20 : 8,
+                  borderRadius: 999,
+                  background: i === activeIndex ? 'var(--color-accent)' : 'var(--color-track)',
+                }}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const chipStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -161,7 +336,7 @@ const chipStyle: React.CSSProperties = {
 };
 
 // Hero styling that differs between light and dark mode.
-// (We will move these into globals.css when we build the project spotlight page.)
+// (We will move these into globals.css during the animations step.)
 const heroCss = `
   .k-hero-bg {
     background: var(--color-hero);
@@ -173,6 +348,9 @@ const heroCss = `
 
   .k-sun-ring-outer { stroke-opacity: 0.35; }
   .k-sun-dark-only { display: none; }
+
+  .k-carousel { scrollbar-width: none; }
+  .k-carousel::-webkit-scrollbar { display: none; }
 
   :root[data-theme="dark"] .k-hero-bg {
     background: #145349;
@@ -193,6 +371,7 @@ export default function HomePage() {
   const [loadingData, setLoadingData] = useState(true);
   const [projects, setProjects] = useState<ProjectWithTotal[]>([]);
   const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     async function load() {
@@ -309,14 +488,13 @@ export default function HomePage() {
 
   const firstName = fullName ? fullName.split(' ')[0] : '';
 
-  // "Active" = not completed or cancelled. The featured project is the newest active one.
+  // "Active" = not completed or cancelled. The carousel shows up to 6 active projects,
+  // newest first. If none are active it shows the latest project instead.
   const activeProjects = projects.filter((p) => !CLOSED_STATUSES.includes(p.status));
-  const featured = activeProjects[0] ?? projects[0] ?? null;
+  const carouselProjects =
+    activeProjects.length > 0 ? activeProjects.slice(0, CAROUSEL_LIMIT) : projects.slice(0, 1);
+  const featured = carouselProjects[activeIndex] ?? carouselProjects[0] ?? null;
   const totalCollected = projects.reduce((sum, p) => sum + p.total, 0);
-  const featuredPercent =
-    featured && featured.target_amount > 0
-      ? Math.min(100, Math.round((featured.total / featured.target_amount) * 100))
-      : 0;
   const quickActions = buildQuickActions(featured ? featured.id : null);
 
   return (
@@ -325,9 +503,7 @@ export default function HomePage() {
 
       {/* ---------- HERO: sun, hills, greeting, chips ---------- */}
       <section style={{ position: 'relative', minHeight: 196 }}>
-        {/* Background layer (clipped to the rounded bottom) */}
         <div className="k-hero-bg" style={{ position: 'absolute', inset: 0 }}>
-          {/* The sun: centre sits 40px from the top and 40px in from the right edge */}
           <svg
             width="160"
             height="160"
@@ -335,9 +511,7 @@ export default function HomePage() {
             style={{ position: 'absolute', top: -40, right: -40 }}
             aria-hidden="true"
           >
-            {/* Thin outer ring (both themes) */}
             <circle className="k-sun-ring-outer" cx="80" cy="80" r="78" fill="none" stroke="#F7931E" strokeWidth="2" />
-            {/* Light mode: second thin ring */}
             <circle
               className="k-sun-light-only"
               cx="80"
@@ -348,14 +522,11 @@ export default function HomePage() {
               strokeOpacity="0.55"
               strokeWidth="2"
             />
-            {/* Dark mode: soft glow instead of the second ring */}
             <circle className="k-sun-dark-only" cx="80" cy="80" r="58" fill="#F7931E" fillOpacity="0.14" />
-            {/* Sun body and bright centre */}
             <circle cx="80" cy="80" r="38" fill="#F7931E" />
             <circle cx="80" cy="80" r="16" fill="#FFD27A" />
           </svg>
 
-          {/* Rolling hills */}
           <svg
             viewBox="0 0 390 190"
             preserveAspectRatio="none"
@@ -367,7 +538,6 @@ export default function HomePage() {
           </svg>
         </div>
 
-        {/* Greeting */}
         <div
           style={{
             position: 'relative',
@@ -390,7 +560,6 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Floating chips overlapping the hero's bottom edge */}
         {!loadingData && projects.length > 0 && (
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: -18 }}>
             <div
@@ -421,11 +590,11 @@ export default function HomePage() {
 
       {/* ---------- BODY ---------- */}
       <div style={{ maxWidth: 700, margin: '0 auto', padding: '0 22px' }}>
-        {/* Featured project card */}
+        {/* Project carousel */}
         <div style={{ marginTop: 34 }}>
           {loadingData && <p className="muted-text">Loading your projects…</p>}
 
-          {!loadingData && !featured && (
+          {!loadingData && carouselProjects.length === 0 && (
             <div className="card" style={{ borderRadius: 20, textAlign: 'center', padding: 24 }}>
               <h2 style={{ margin: '0 0 6px', fontSize: 17 }}>No projects yet</h2>
               <p className="muted-text" style={{ marginBottom: 16, fontSize: 13 }}>
@@ -437,41 +606,15 @@ export default function HomePage() {
             </div>
           )}
 
-          {!loadingData && featured && (
+          {!loadingData && carouselProjects.length > 0 && (
             <>
-              <a
-                href={`/projects/${featured.id}`}
-                className="card"
-                style={{
-                  display: 'block',
-                  color: 'var(--color-ink)',
-                  textDecoration: 'none',
-                  borderRadius: 20,
-                  boxShadow: '0 10px 30px var(--color-shadow)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontFamily: 'var(--font-heading), sans-serif',
-                        fontWeight: 700,
-                        fontSize: 19,
-                      }}
-                    >
-                      {featured.title}
-                    </div>
-                    <div style={{ fontSize: 13, color: 'var(--color-muted)', marginTop: 2 }}>
-                      KES {featured.total.toLocaleString()} of {featured.target_amount.toLocaleString()}
-                    </div>
-                  </div>
-                  <div style={{ flexShrink: 0 }}>
-                    <ProgressRing percent={featuredPercent} />
-                  </div>
-                </div>
-              </a>
+              <ProjectCarousel
+                projects={carouselProjects}
+                activeIndex={activeIndex}
+                onIndexChange={setActiveIndex}
+              />
               {projects.length > 1 && (
-                <p style={{ textAlign: 'right', marginTop: 8, fontSize: 13 }}>
+                <p style={{ textAlign: 'right', marginTop: 4, fontSize: 13 }}>
                   <a href="/projects">All projects ({projects.length}) →</a>
                 </p>
               )}
@@ -485,7 +628,7 @@ export default function HomePage() {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            marginTop: 22,
+            marginTop: 18,
           }}
         >
           <h2 style={{ margin: 0, fontSize: 16 }}>Quick actions</h2>
