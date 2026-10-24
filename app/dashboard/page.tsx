@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import Avatar from '@/components/Avatar';
+import { CountUp, MiniRing } from '@/components/ProjectProgress';
 
 // Projects with these statuses are finished, so they are not "active".
 const CLOSED_STATUSES = ['completed', 'cancelled'];
@@ -113,37 +114,35 @@ function buildQuickActions(featuredId: string | null): QuickAction[] {
   ];
 }
 
-function ProgressRing({ percent }: { percent: number }) {
-  const radius = 26;
-  const circumference = 2 * Math.PI * radius;
+// Shimmering placeholders shown while the data loads.
+function ProjectSkeleton() {
   return (
-    <svg width="56" height="56" viewBox="0 0 64 64" role="img" aria-label={`${percent} percent funded`}>
-      <circle cx="32" cy="32" r={radius} fill="none" stroke="var(--color-track)" strokeWidth="7" />
-      {percent > 0 && (
-        <circle
-          cx="32"
-          cy="32"
-          r={radius}
-          fill="none"
-          stroke="var(--color-accent)"
-          strokeWidth="7"
-          strokeLinecap="round"
-          strokeDasharray={`${(percent / 100) * circumference} ${circumference}`}
-          transform="rotate(-90 32 32)"
-        />
-      )}
-      <text
-        x="32"
-        y="37"
-        textAnchor="middle"
-        fontSize="14"
-        fontWeight="700"
-        fill="var(--color-ink)"
-        style={{ fontFamily: 'var(--font-heading), sans-serif' }}
-      >
-        {percent}%
-      </text>
-    </svg>
+    <div
+      className="card"
+      style={{ borderRadius: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}
+    >
+      <div style={{ flex: 1 }}>
+        <div className="k-skeleton" style={{ height: 20, width: '60%' }} />
+        <div className="k-skeleton" style={{ height: 14, width: '40%', marginTop: 10 }} />
+      </div>
+      <div className="k-skeleton" style={{ width: 56, height: 56, borderRadius: '50%' }} />
+    </div>
+  );
+}
+
+function ActivitySkeleton() {
+  return (
+    <div>
+      {[0, 1, 2].map((i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0' }}>
+          <div className="k-skeleton" style={{ width: 36, height: 36, borderRadius: '50%', flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <div className="k-skeleton" style={{ height: 13, width: '70%' }} />
+            <div className="k-skeleton" style={{ height: 11, width: '45%', marginTop: 8 }} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -249,7 +248,7 @@ function ProjectCarousel({
             <a
               key={project.id}
               href={`/projects/${project.id}`}
-              className="card"
+              className="card k-press"
               style={{
                 flex: '0 0 100%',
                 scrollSnapAlign: 'start',
@@ -273,11 +272,11 @@ function ProjectCarousel({
                     {project.title}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--color-muted)', marginTop: 2 }}>
-                    KES {project.total.toLocaleString()} of {project.target_amount.toLocaleString()}
+                    KES <CountUp value={project.total} /> of {project.target_amount.toLocaleString()}
                   </div>
                 </div>
                 <div style={{ flexShrink: 0 }}>
-                  <ProgressRing percent={percent} />
+                  <MiniRing percent={percent} />
                 </div>
               </div>
             </a>
@@ -309,6 +308,7 @@ function ProjectCarousel({
                   width: i === activeIndex ? 20 : 8,
                   borderRadius: 999,
                   background: i === activeIndex ? 'var(--color-accent)' : 'var(--color-track)',
+                  transition: 'width 0.25s ease, background-color 0.25s ease',
                 }}
               />
             </button>
@@ -334,34 +334,6 @@ const chipStyle: React.CSSProperties = {
   boxShadow: '0 6px 18px var(--color-shadow)',
   whiteSpace: 'nowrap',
 };
-
-// Hero styling that differs between light and dark mode.
-// (We will move these into globals.css during the animations step.)
-const heroCss = `
-  .k-hero-bg {
-    background: var(--color-hero);
-    border-radius: 0 0 28px 28px;
-    overflow: hidden;
-  }
-  .k-hill-1 { fill: var(--color-hill-1); }
-  .k-hill-2 { fill: var(--color-hill-2); }
-
-  .k-sun-ring-outer { stroke-opacity: 0.35; }
-  .k-sun-dark-only { display: none; }
-
-  .k-carousel { scrollbar-width: none; }
-  .k-carousel::-webkit-scrollbar { display: none; }
-
-  :root[data-theme="dark"] .k-hero-bg {
-    background: #145349;
-    box-shadow: 0 1px 0 #2F7A6D, 0 14px 34px rgba(43, 196, 176, 0.14);
-  }
-  :root[data-theme="dark"] .k-hill-1 { fill: #1B6B5F; }
-  :root[data-theme="dark"] .k-hill-2 { fill: #0E3F39; }
-  :root[data-theme="dark"] .k-sun-ring-outer { stroke-opacity: 0.3; }
-  :root[data-theme="dark"] .k-sun-light-only { display: none; }
-  :root[data-theme="dark"] .k-sun-dark-only { display: inline; }
-`;
 
 export default function HomePage() {
   const router = useRouter();
@@ -499,8 +471,6 @@ export default function HomePage() {
 
   return (
     <main>
-      <style>{heroCss}</style>
-
       {/* ---------- HERO: sun, hills, greeting, chips ---------- */}
       <section style={{ position: 'relative', minHeight: 196 }}>
         <div className="k-hero-bg" style={{ position: 'absolute', inset: 0 }}>
@@ -539,6 +509,7 @@ export default function HomePage() {
         </div>
 
         <div
+          className="k-rise"
           style={{
             position: 'relative',
             maxWidth: 700,
@@ -571,16 +542,19 @@ export default function HomePage() {
                 gap: 10,
               }}
             >
-              <span style={{ ...chipStyle, flexShrink: 0 }}>
+              <span className="k-float" style={{ ...chipStyle, flexShrink: 0 }}>
                 <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-primary)' }} />
-                {activeProjects.length} active {activeProjects.length === 1 ? 'project' : 'projects'}
+                <span>
+                  <CountUp value={activeProjects.length} /> active{' '}
+                  {activeProjects.length === 1 ? 'project' : 'projects'}
+                </span>
               </span>
-              <span style={chipStyle}>
+              <span className="k-float-late" style={chipStyle}>
                 <span
                   style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--color-accent)', flexShrink: 0 }}
                 />
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  KES {totalCollected.toLocaleString()} collected
+                  KES <CountUp value={totalCollected} /> collected
                 </span>
               </span>
             </div>
@@ -591,8 +565,8 @@ export default function HomePage() {
       {/* ---------- BODY ---------- */}
       <div style={{ maxWidth: 700, margin: '0 auto', padding: '0 22px' }}>
         {/* Project carousel */}
-        <div style={{ marginTop: 34 }}>
-          {loadingData && <p className="muted-text">Loading your projects…</p>}
+        <div className="k-rise" style={{ marginTop: 34, animationDelay: '0.08s' }}>
+          {loadingData && <ProjectSkeleton />}
 
           {!loadingData && carouselProjects.length === 0 && (
             <div className="card" style={{ borderRadius: 20, textAlign: 'center', padding: 24 }}>
@@ -624,11 +598,13 @@ export default function HomePage() {
 
         {/* Quick actions header + New project pill */}
         <div
+          className="k-rise"
           style={{
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
             marginTop: 18,
+            animationDelay: '0.16s',
           }}
         >
           <h2 style={{ margin: 0, fontSize: 16 }}>Quick actions</h2>
@@ -660,11 +636,17 @@ export default function HomePage() {
             textAlign: 'center',
           }}
         >
-          {quickActions.map((action) => (
+          {quickActions.map((action, i) => (
             <a
               key={action.label}
               href={action.href}
-              style={{ display: 'block', color: 'var(--color-ink)', textDecoration: 'none' }}
+              className="k-rise k-press"
+              style={{
+                display: 'block',
+                color: 'var(--color-ink)',
+                textDecoration: 'none',
+                animationDelay: `${0.2 + i * 0.06}s`,
+              }}
             >
               <div
                 style={{
@@ -698,8 +680,10 @@ export default function HomePage() {
         </div>
 
         {/* Recent activity: each row opens that project's activity page */}
-        <h2 style={{ margin: '26px 0 6px', fontSize: 16 }}>Recent activity</h2>
-        {loadingData && <p className="muted-text">Loading…</p>}
+        <h2 className="k-rise" style={{ margin: '26px 0 6px', fontSize: 16, animationDelay: '0.4s' }}>
+          Recent activity
+        </h2>
+        {loadingData && <ActivitySkeleton />}
         {!loadingData && activity.length === 0 && (
           <p className="muted-text" style={{ fontSize: 13 }}>
             Contributions and withdrawal requests from your projects will appear here.
@@ -712,6 +696,7 @@ export default function HomePage() {
               <a
                 key={item.id}
                 href={`/projects/${item.projectId}/activity`}
+                className="k-rise"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -720,6 +705,7 @@ export default function HomePage() {
                   color: 'var(--color-ink)',
                   textDecoration: 'none',
                   borderBottom: index === activity.length - 1 ? 'none' : '1px solid var(--color-track)',
+                  animationDelay: `${0.45 + index * 0.07}s`,
                 }}
               >
                 <div

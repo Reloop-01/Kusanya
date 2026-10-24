@@ -165,3 +165,123 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   font-size: 12px;
   color: var(--color-muted);
 }
+
+/* =====================================================================
+   STEP 4: SHARED HERO STYLES + ANIMATIONS (added at the end of the file)
+   ===================================================================== */
+
+/* ---- Shared hero styles (Home and PageHero use these) ---- */
+.k-hero-bg {
+  background: var(--color-hero);
+  border-radius: 0 0 28px 28px;
+  overflow: hidden;
+}
+.k-hill-1 { fill: var(--color-hill-1); }
+.k-hill-2 { fill: var(--color-hill-2); }
+.k-sun-ring-outer { stroke-opacity: 0.35; }
+.k-sun-dark-only { display: none; }
+
+.k-sp-hero-bg {
+  background: var(--color-hero);
+  border-radius: 0 0 28px 28px;
+  overflow: hidden;
+}
+.k-sp-ring { stroke-opacity: 0.5; }
+.k-sp-glow { display: none; }
+
+.k-carousel { scrollbar-width: none; }
+.k-carousel::-webkit-scrollbar { display: none; }
+
+:root[data-theme="dark"] .k-hero-bg,
+:root[data-theme="dark"] .k-sp-hero-bg {
+  background: #145349;
+  box-shadow: 0 1px 0 #2F7A6D, 0 14px 34px rgba(43, 196, 176, 0.14);
+}
+:root[data-theme="dark"] .k-hill-1 { fill: #1B6B5F; }
+:root[data-theme="dark"] .k-hill-2 { fill: #0E3F39; }
+:root[data-theme="dark"] .k-sun-ring-outer { stroke-opacity: 0.3; }
+:root[data-theme="dark"] .k-sun-light-only { display: none; }
+:root[data-theme="dark"] .k-sun-dark-only { display: inline; }
+:root[data-theme="dark"] .k-sp-ring { stroke-opacity: 0.3; }
+:root[data-theme="dark"] .k-sp-glow { display: inline; }
+
+/* ---- Keyframes ---- */
+@keyframes k-sun-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@keyframes k-sun-glow {
+  0%, 100% { transform: scale(0.96); opacity: 0.8; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+@keyframes k-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes k-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+@keyframes k-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes k-pop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes k-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(242, 107, 33, 0.55); }
+  100% { box-shadow: 0 0 0 14px rgba(242, 107, 33, 0); }
+}
+
+/* ---- Sun glow (applies to every sun in the app) ---- */
+.k-sp-ring,
+.k-sun-ring-outer,
+.k-lp-ring {
+  animation: k-sun-breathe 4.5s ease-in-out infinite;
+}
+.k-lp-ring + .k-lp-ring { animation-delay: -2.2s; }
+.k-sp-glow,
+.k-sun-dark-only,
+.k-lp-glow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: k-sun-glow 5s ease-in-out infinite;
+}
+
+/* ---- Entrance and floating ---- */
+.k-rise { animation: k-rise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) backwards; }
+.k-float { animation: k-float 4s ease-in-out infinite; }
+.k-float-late { animation: k-float 4s ease-in-out -2s infinite; }
+
+/* ---- Shimmer loading placeholder ---- */
+.k-skeleton {
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--color-track) 25%, var(--color-surface) 50%, var(--color-track) 75%);
+  background-size: 200% 100%;
+  animation: k-shimmer 1.4s linear infinite;
+}
+
+/* ---- Press feedback ---- */
+button,
+a[style*="border-radius: 999px"],
+.k-press {
+  transition: transform 0.12s ease, background-color 0.2s ease, opacity 0.2s ease;
+}
+button:not(:disabled):active,
+a[style*="border-radius: 999px"]:active {
+  transform: scale(0.96);
+}
+.k-press:active { transform: scale(0.94); }
+
+/* ---- Respect "reduce motion" settings ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

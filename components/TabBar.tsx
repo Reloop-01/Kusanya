@@ -69,9 +69,15 @@ export default function TabBar() {
   const inShownArea = SHOW_ON.some((prefix) => pathname.startsWith(prefix));
   if (!loggedIn || !inShownArea) return null;
 
+  const activeIndex = tabs.findIndex((tab) => tab.isActive(pathname));
+
   return (
     <>
       <style>{`
+        @keyframes k-tabbar-in {
+          from { opacity: 0; transform: translateX(-50%) translateY(120%); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
         .k-tabbar {
           --tabbar-bg: #0B2B27;
           --tabbar-border: transparent;
@@ -87,17 +93,40 @@ export default function TabBar() {
           border-radius: 30px;
           background: var(--tabbar-bg);
           border: 1px solid var(--tabbar-border);
-          display: flex;
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
           align-items: center;
-          justify-content: space-around;
           box-shadow: 0 12px 30px rgba(11, 43, 39, 0.35);
           z-index: 50;
+          animation: k-tabbar-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
         }
         :root[data-theme="dark"] .k-tabbar {
           --tabbar-bg: #12332E;
           --tabbar-border: #1B4A43;
         }
+        .k-tab-indicator {
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 0;
+          width: 25%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          transition: transform 0.4s cubic-bezier(0.34, 1.35, 0.64, 1), opacity 0.2s ease;
+        }
+        .k-tab-dot {
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: #F26B21;
+          box-shadow: 0 0 16px rgba(242, 107, 33, 0.6);
+        }
         .k-tab {
+          position: relative;
+          z-index: 1;
+          justify-self: center;
           width: 44px;
           height: 44px;
           border-radius: 50%;
@@ -106,21 +135,30 @@ export default function TabBar() {
           justify-content: center;
           color: var(--tabbar-icon);
           text-decoration: none;
+          transition: transform 0.12s ease, color 0.25s ease;
         }
         .k-tab:hover { text-decoration: none; }
+        .k-tab:active { transform: scale(0.88); }
         .k-tab:focus-visible {
           outline: 2px solid var(--color-accent);
           outline-offset: 2px;
         }
-        .k-tab[aria-current="page"] {
-          background: #F26B21;
-          color: var(--tabbar-active-icon);
-          box-shadow: 0 0 16px rgba(242, 107, 33, 0.6);
-        }
+        .k-tab[aria-current="page"] { color: var(--tabbar-active-icon); }
         .k-tabbar-spacer { height: calc(96px + env(safe-area-inset-bottom, 0px)); }
       `}</style>
 
       <nav className="k-tabbar" aria-label="Main navigation">
+        <span
+          className="k-tab-indicator"
+          aria-hidden="true"
+          style={{
+            transform: `translateX(${Math.max(0, activeIndex) * 100}%)`,
+            opacity: activeIndex === -1 ? 0 : 1,
+          }}
+        >
+          <span className="k-tab-dot" />
+        </span>
+
         {tabs.map((tab) => {
           const active = tab.isActive(pathname);
           return (
