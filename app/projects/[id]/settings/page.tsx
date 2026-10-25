@@ -5,6 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { authFetch } from '@/lib/authFetch';
 import Avatar from '@/components/Avatar';
+import PageHeader from '@/components/PageHeader';
+import VisibilityPicker from '@/components/VisibilityPicker';
+import { Section, Field, FilterChip, Pill, Notice, CurrencyInput, outlineButton } from '@/components/ui';
 
 type Member = {
   id: string;
@@ -21,28 +24,60 @@ type Invite = {
   status: string;
 };
 
+const ROLE_LOOK: Record<string, { bg: string; ink: string }> = {
+  organizer: { bg: 'var(--tile-sand-bg)', ink: 'var(--tile-sand-ic)' },
+  administrator: { bg: 'var(--tile-sky-bg)', ink: 'var(--tile-sky-ic)' },
+  approver: { bg: 'var(--tile-mint-bg)', ink: 'var(--tile-mint-ic)' },
+  auditor: { bg: 'var(--tile-peach-bg)', ink: 'var(--tile-peach-ic)' },
+  contributor: { bg: 'var(--color-track)', ink: 'var(--color-muted)' },
+};
+
+const ROLE_GUIDE = [
+  { role: 'organizer', text: 'Owns the project: edits its details and manages the team and rules.' },
+  { role: 'administrator', text: 'Records contributions, requests withdrawals and can approve them.' },
+  { role: 'approver', text: 'Approves or rejects withdrawal requests.' },
+  { role: 'auditor', text: 'View only. Can see everything but change nothing.' },
+  { role: 'contributor', text: 'A supporter who is part of the project.' },
+];
+
+const STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+const JUMPS = [
+  { id: 'details', label: 'Details' },
+  { id: 'payment', label: 'Payment' },
+  { id: 'team', label: 'Team' },
+  { id: 'rule', label: 'Approvals' },
+];
+
 export default function ProjectSettingsPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
 
   const [checkingAccess, setCheckingAccess] = useState(true);
+  const [meId, setMeId] = useState('');
   const [myRole, setMyRole] = useState<string | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('approver');
-  const [minApprovals, setMinApprovals] = useState('1');
+  const [minApprovals, setMinApprovals] = useState(1);
   const [paymentInstructions, setPaymentInstructions] = useState('');
 
   const [title, setTitle] = useState('');
   const [purpose, setPurpose] = useState('');
+  const [currency, setCurrency] = useState('KES');
   const [targetAmount, setTargetAmount] = useState('');
   const [deadline, setDeadline] = useState('');
   const [visibility, setVisibility] = useState('link_only');
   const [status, setStatus] = useState('active');
   const [detailsError, setDetailsError] = useState('');
   const [detailsSaved, setDetailsSaved] = useState(false);
+  const [detailsSaving, setDetailsSaving] = useState(false);
 
   const [error, setError] = useState('');
   const [notFoundEmail, setNotFoundEmail] = useState('');
@@ -60,6 +95,7 @@ export default function ProjectSettingsPage() {
       router.push('/login');
       return;
     }
+    setMeId(userData.user.id);
 
     const { data: membership } = await supabase
       .from('project_members')
@@ -78,12 +114,13 @@ export default function ProjectSettingsPage() {
 
     const { data: project } = await supabase
       .from('projects')
-      .select('title, purpose, target_amount, deadline, visibility, status, payment_instructions')
+      .select('title, purpose, currency, target_amount, deadline, visibility, status, payment_instructions')
       .eq('id', projectId)
       .single();
 
     setTitle(project?.title ?? '');
     setPurpose(project?.purpose ?? '');
+    setCurrency(project?.currency ?? 'KES');
     setTargetAmount(project?.target_amount != null ? String(project.target_amount) : '');
     setDeadline(project?.deadline ?? '');
     setVisibility(project?.visibility ?? 'link_only');
@@ -100,7 +137,7 @@ export default function ProjectSettingsPage() {
     });
     const nameById: Record<string, string> = {};
     const avatarById: Record<string, string | null> = {};
-    (names ?? []).forEach((n: any) => {
+    (names ?? []).forEach((n: { user_id: string; full_name: string; avatar_url: string | null }) => {
       nameById[n.user_id] = n.full_name;
       avatarById[n.user_id] = n.avatar_url;
     });
@@ -128,7 +165,7 @@ export default function ProjectSettingsPage() {
       .eq('project_id', projectId)
       .maybeSingle();
 
-    if (rule) setMinApprovals(String(rule.min_approvals));
+    if (rule) setMinApprovals(Number(rule.min_approvals));
   }, [projectId, router]);
 
   useEffect(() => {
@@ -139,6 +176,7 @@ export default function ProjectSettingsPage() {
     e.preventDefault();
     setDetailsError('');
     setDetailsSaved(false);
+    setDetailsSaving(true);
 
     const { data: current } = await supabase
       .from('projects')
@@ -146,6 +184,17 @@ export default function ProjectSettingsPage() {
       .eq('id', projectId)
       .single();
     const previousStatus = current?.status;
+
+    const closing = previousStatus !== status && (status === 'completed' || status === 'cancelled');
+    if (closing) {
+      const sure = window.confirm(
+        `Mark this project as ${status}? New contributions will be blocked and all members will be notified.`
+      );
+      if (!sure) {
+        setDetailsSaving(false);
+        return;
+      }
+    }
 
     const { error: updateError } = await supabase
       .from('projects')
@@ -160,11 +209,12 @@ export default function ProjectSettingsPage() {
       .eq('id', projectId);
 
     if (updateError) {
+      setDetailsSaving(false);
       setDetailsError(updateError.message);
       return;
     }
 
-    if (previousStatus !== status && (status === 'completed' || status === 'cancelled')) {
+    if (closing) {
       try {
         await authFetch('/api/notify-project-closed', { projectId });
       } catch (notifyError) {
@@ -172,6 +222,7 @@ export default function ProjectSettingsPage() {
       }
     }
 
+    setDetailsSaving(false);
     setDetailsSaved(true);
     setTimeout(() => setDetailsSaved(false), 3000);
   }
@@ -193,16 +244,18 @@ export default function ProjectSettingsPage() {
       return;
     }
 
+    const foundId = (found as { id: string }).id;
+
     const { error: insertError } = await supabase.from('project_members').insert({
       project_id: projectId,
-      user_id: (found as any).id,
+      user_id: foundId,
       role,
     });
 
     if (insertError) {
       setLoading(false);
       if (insertError.code === '23505') {
-        setError('This person already has a role on this project. Remove their existing role first to change it.');
+        setError('This person already has a role on this project. One person can only have one role.');
       } else {
         setError(insertError.message);
       }
@@ -212,7 +265,7 @@ export default function ProjectSettingsPage() {
     try {
       await authFetch('/api/notify-member-added', {
         projectId,
-        memberUserId: (found as any).id,
+        memberUserId: foundId,
       });
     } catch (notifyError) {
       console.error('Failed to notify new member:', notifyError);
@@ -266,7 +319,7 @@ export default function ProjectSettingsPage() {
     const { error: upsertError } = await supabase
       .from('approval_rules')
       .upsert(
-        { project_id: projectId, min_approvals: Number(minApprovals), total_approvers: members.length },
+        { project_id: projectId, min_approvals: minApprovals, total_approvers: members.length },
         { onConflict: 'project_id' }
       );
 
@@ -306,173 +359,394 @@ export default function ProjectSettingsPage() {
     return (
       <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
         <h1>Not authorized</h1>
-        <p>You&apos;re not a member of this project.</p>
+        <p style={{ marginBottom: 16 }}>You&apos;re not a member of this project.</p>
         <a href="/dashboard">Back to dashboard</a>
       </main>
     );
   }
 
+  const maxApprovals = Math.max(1, members.length);
+  const stepperButton: React.CSSProperties = {
+    width: 44,
+    height: 44,
+    padding: 0,
+    borderRadius: '50%',
+    fontSize: 22,
+    lineHeight: 1,
+  };
+
   return (
-    <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
-      <p style={{ marginBottom: 16 }}><a href={`/projects/${projectId}`}>← Back to project summary</a></p>
-      <h1>{title} — Settings</h1>
+    <main style={{ maxWidth: 640, margin: '0 auto', padding: '24px 22px 8px' }}>
+      <PageHeader
+        backHref={`/projects/${projectId}`}
+        backLabel="Back to project"
+        title="Settings"
+        subtitle={title}
+      />
 
-      <div className="card" style={{ marginTop: 20, marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0 }}>Project details</h2>
-        {isOrganizer ? (
-          <form onSubmit={handleSaveDetails} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <label>
-              Title
-              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required style={{ width: '100%', marginTop: 4 }} />
-            </label>
-            <label>
-              Purpose / description
-              <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={3} style={{ width: '100%', marginTop: 4 }} />
-            </label>
-            <label>
-              Target amount (KES)
-              <input type="number" min="1" value={targetAmount}
-                onChange={(e) => setTargetAmount(e.target.value)} required style={{ width: '100%', marginTop: 4 }} />
-            </label>
-            <label>
-              Deadline
-              <input type="date" value={deadline ?? ''} onChange={(e) => setDeadline(e.target.value)} style={{ width: '100%', marginTop: 4 }} />
-            </label>
-            <label>
-              Who can see this project?
-              <select value={visibility} onChange={(e) => setVisibility(e.target.value)} style={{ width: '100%', marginTop: 4 }}>
-                <option value="private">Private (only people I add)</option>
-                <option value="link_only">Anyone with the link</option>
-                <option value="public">Public</option>
-              </select>
-            </label>
-            <label>
-              Project status
-              <select value={status} onChange={(e) => setStatus(e.target.value)} style={{ width: '100%', marginTop: 4 }}>
-                <option value="active">Active</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-              </select>
-            </label>
-            {detailsError && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{detailsError}</p>}
-            <button type="submit">Save details</button>
-            {detailsSaved && <span style={{ color: 'var(--color-primary)', fontSize: 13 }}>Saved!</span>}
-          </form>
-        ) : (
-          <p className="muted-text">Only the organizer can edit the project&apos;s details.</p>
+      {/* Jump links */}
+      <div className="k-rise" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, animationDelay: '0.03s' }}>
+        {JUMPS.map((j) => (
+          <FilterChip
+            key={j.id}
+            label={j.label}
+            selected={false}
+            onClick={() => document.getElementById(j.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          />
+        ))}
+        {isOrganizer && (
+          <a
+            href={`/projects/${projectId}/materials`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              height: 34,
+              padding: '0 14px',
+              borderRadius: 999,
+              fontSize: 13,
+              fontWeight: 600,
+              border: '1.5px solid var(--color-input-border)',
+              color: 'var(--color-ink)',
+              textDecoration: 'none',
+            }}
+          >
+            Photos &amp; documents →
+          </a>
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0 }}>How to contribute</h2>
-        {isOrganizer ? (
-          <form onSubmit={handleSavePaymentInstructions} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <textarea
-              placeholder={'e.g. M-Pesa Paybill: 247247\nAccount: PIANO2026\nPlease use your name as the reference.'}
-              value={paymentInstructions}
-              onChange={(e) => setPaymentInstructions(e.target.value)}
-              rows={4}
-              style={{ width: '100%' }}
-            />
-            <button type="submit">Save</button>
-            {paymentSaved && <span style={{ color: 'var(--color-primary)', fontSize: 13 }}>Saved!</span>}
-            {paymentError && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{paymentError}</p>}
-          </form>
-        ) : (
-          <p style={{ whiteSpace: 'pre-line' }}>
-            {paymentInstructions || 'The organizer hasn\'t added payment instructions yet.'}
-          </p>
-        )}
-      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* ---------- PROJECT DETAILS ---------- */}
+        <Section
+          id="details"
+          title="Project details"
+          delay={0.05}
+          icon={
+            <>
+              <path d="M5 4h11l3 3v13H5z" />
+              <path d="M8 10h8M8 14h8" />
+            </>
+          }
+        >
+          {isOrganizer ? (
+            <form onSubmit={handleSaveDetails} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <Field label="Title">
+                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required style={{ width: '100%' }} />
+              </Field>
+              <Field label="Purpose / description">
+                <textarea value={purpose} onChange={(e) => setPurpose(e.target.value)} rows={4} style={{ width: '100%' }} />
+              </Field>
+              <Field label="Target amount">
+                <CurrencyInput
+                  currency={currency}
+                  value={targetAmount}
+                  onChange={setTargetAmount}
+                  placeholder="Target amount"
+                  required
+                />
+              </Field>
+              <Field label="Deadline" hint="optional">
+                <input
+                  type="date"
+                  value={deadline ?? ''}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </Field>
+              {deadline && (
+                <div>
+                  <FilterChip label="Remove deadline" selected={false} onClick={() => setDeadline('')} />
+                </div>
+              )}
 
-      <div className="card" style={{ marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0 }}>Team members</h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {members.map((m) => (
-            <div
-              key={m.id}
-              style={{
-                border: '1px solid var(--color-track)',
-                borderRadius: 8,
-                padding: 10,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-              }}
-            >
-              <Avatar url={m.avatar_url} name={m.full_name} size={34} />
               <div>
-                <strong>{m.full_name}</strong> <span className="muted-text">— {m.role}</span>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Who can see this project?</div>
+                <VisibilityPicker value={visibility} onChange={setVisibility} />
+                {visibility === 'private' && (
+                  <div style={{ marginTop: 10 }}>
+                    <Notice kind="info">
+                      Making a project private turns off its public link and QR code. Anyone who had the link will no
+                      longer be able to open it.
+                    </Notice>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
-        </div>
 
-        {invites.length > 0 && (
-          <div style={{ marginBottom: 16 }}>
-            <p className="muted-text" style={{ marginBottom: 6 }}>Pending invites:</p>
-            {invites.map((inv) => (
-              <div key={inv.id} style={{ border: '1px dashed var(--color-track)', borderRadius: 8, padding: 10, marginBottom: 6 }}>
-                <span className="muted-text">{inv.email} — invited as {inv.role}</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Project status</div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {STATUS_OPTIONS.map((option) => (
+                    <FilterChip
+                      key={option.value}
+                      label={option.label}
+                      selected={status === option.value}
+                      onClick={() => setStatus(option.value)}
+                    />
+                  ))}
+                </div>
+                {status !== 'active' && (
+                  <div style={{ marginTop: 10 }}>
+                    <Notice kind="info">
+                      A {status} project no longer accepts contributions. Withdrawals can still be requested and
+                      approved. Members are notified when you save.
+                    </Notice>
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
-        )}
 
-        {isOrganizer ? (
-          <>
-            <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input type="email" placeholder="Their email" value={email}
-                onChange={(e) => { setEmail(e.target.value); setNotFoundEmail(''); }} required />
-              <select value={role} onChange={(e) => setRole(e.target.value)}>
-                <option value="approver">Approver (can approve/reject withdrawals)</option>
-                <option value="administrator">Administrator (can also record contributions)</option>
-                <option value="contributor">Contributor</option>
-                <option value="auditor">Auditor (view only)</option>
-              </select>
-              {error && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{error}</p>}
-              <button type="submit" disabled={loading}>
-                {loading ? 'Checking...' : 'Add team member'}
+              {detailsError && <Notice kind="error">{detailsError}</Notice>}
+              {detailsSaved && <Notice kind="success">✓ Details saved.</Notice>}
+              <button type="submit" disabled={detailsSaving} style={{ height: 46 }}>
+                {detailsSaving ? 'Saving...' : 'Save details'}
               </button>
             </form>
+          ) : (
+            <p className="muted-text" style={{ margin: 0 }}>
+              Only the organizer can edit the project&apos;s details.
+            </p>
+          )}
+        </Section>
 
-            {notFoundEmail && (
-              <div style={{ marginTop: 12, padding: 12, background: 'var(--color-track)', borderRadius: 8 }}>
-                <p style={{ margin: '0 0 8px', fontSize: 14 }}>
-                  {notFoundEmail} doesn&apos;t have a Kusanya account yet. Invite them?
-                </p>
-                <button onClick={handleSendInvite} disabled={invitingLoading}>
-                  {invitingLoading ? 'Sending...' : `Send invite as ${notFoundRole}`}
+        {/* ---------- HOW TO CONTRIBUTE ---------- */}
+        <Section
+          id="payment"
+          title="How to contribute"
+          hint="Shown to everyone who opens the project"
+          delay={0.1}
+          icon={
+            <>
+              <rect x="3" y="6" width="18" height="12" rx="2" />
+              <circle cx="12" cy="12" r="2.5" />
+            </>
+          }
+        >
+          {isOrganizer ? (
+            <form onSubmit={handleSavePaymentInstructions} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <textarea
+                placeholder={'e.g. M-Pesa Paybill: 247247\nAccount: PIANO2026\nPlease use your name as the reference.'}
+                value={paymentInstructions}
+                onChange={(e) => setPaymentInstructions(e.target.value)}
+                rows={5}
+                style={{ width: '100%' }}
+              />
+              {paymentError && <Notice kind="error">{paymentError}</Notice>}
+              {paymentSaved && <Notice kind="success">✓ Payment instructions saved.</Notice>}
+              <button type="submit" style={{ height: 46 }}>
+                Save instructions
+              </button>
+            </form>
+          ) : (
+            <p style={{ whiteSpace: 'pre-line', margin: 0, fontSize: 14 }}>
+              {paymentInstructions || "The organizer hasn't added payment instructions yet."}
+            </p>
+          )}
+        </Section>
+
+        {/* ---------- TEAM ---------- */}
+        <Section
+          id="team"
+          title="Team members"
+          hint={`${members.length} ${members.length === 1 ? 'person' : 'people'} on this project`}
+          delay={0.15}
+          icon={
+            <>
+              <circle cx="9" cy="8" r="3.5" />
+              <path d="M2.5 20c0-3.5 3-5.5 6.5-5.5s6.5 2 6.5 5.5" />
+              <circle cx="17.5" cy="9" r="2.5" />
+              <path d="M17 14.5c2.5 0 4.5 1.5 4.5 4" />
+            </>
+          }
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {members.map((m) => {
+              const look = ROLE_LOOK[m.role] ?? ROLE_LOOK.contributor;
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    border: '1px solid var(--color-track)',
+                    borderRadius: 14,
+                    padding: '10px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                  }}
+                >
+                  <Avatar url={m.avatar_url} name={m.full_name} size={36} />
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600 }}>
+                    {m.full_name}
+                    {m.user_id === meId && (
+                      <span style={{ fontWeight: 400, color: 'var(--color-muted)' }}> (you)</span>
+                    )}
+                  </div>
+                  <Pill text={m.role} bg={look.bg} ink={look.ink} />
+                </div>
+              );
+            })}
+          </div>
+
+          {invites.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-muted)', marginBottom: 6 }}>
+                PENDING INVITES
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {invites.map((inv) => (
+                  <div
+                    key={inv.id}
+                    style={{
+                      border: '1px dashed var(--color-input-border)',
+                      borderRadius: 14,
+                      padding: '10px 12px',
+                      fontSize: 13,
+                      color: 'var(--color-muted)',
+                    }}
+                  >
+                    {inv.email} — invited as {inv.role}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isOrganizer ? (
+            <>
+              <form onSubmit={handleAddMember} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Add someone</div>
+                <input
+                  type="email"
+                  placeholder="Their email"
+                  aria-label="Their email"
+                  value={email}
+                  onChange={(e) => {
+                    setEmail(e.target.value);
+                    setNotFoundEmail('');
+                  }}
+                  required
+                />
+                <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Their role">
+                  <option value="approver">Approver (can approve/reject withdrawals)</option>
+                  <option value="administrator">Administrator (can also record contributions)</option>
+                  <option value="contributor">Contributor</option>
+                  <option value="auditor">Auditor (view only)</option>
+                </select>
+                {error && <Notice kind="error">{error}</Notice>}
+                <button type="submit" disabled={loading} style={{ height: 46 }}>
+                  {loading ? 'Checking...' : 'Add team member'}
+                </button>
+              </form>
+
+              {notFoundEmail && (
+                <div
+                  className="k-rise"
+                  style={{ padding: 14, background: 'var(--tile-sand-bg)', borderRadius: 14, color: 'var(--tile-sand-ic)' }}
+                >
+                  <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.45 }}>
+                    <strong>{notFoundEmail}</strong> doesn&apos;t have a Kusanya account yet. Invite them?
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button onClick={handleSendInvite} disabled={invitingLoading} style={{ height: 42 }}>
+                      {invitingLoading ? 'Sending...' : `Send invite as ${notFoundRole}`}
+                    </button>
+                    <button onClick={() => setNotFoundEmail('')} style={{ ...outlineButton, height: 42 }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="muted-text" style={{ margin: 0 }}>
+              Only the organizer can add or change team members.
+            </p>
+          )}
+
+          {/* Role guide */}
+          <div style={{ background: 'var(--color-track)', borderRadius: 14, padding: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-muted)', marginBottom: 8 }}>
+              WHAT EACH ROLE CAN DO
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {ROLE_GUIDE.map((item) => {
+                const look = ROLE_LOOK[item.role];
+                return (
+                  <div key={item.role} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13, lineHeight: 1.4 }}>
+                    <span style={{ flexShrink: 0, width: 104 }}>
+                      <Pill text={item.role} bg={look.bg} ink={look.ink} />
+                    </span>
+                    <span>{item.text}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </Section>
+
+        {/* ---------- APPROVAL RULE ---------- */}
+        <Section
+          id="rule"
+          title="Approval rule"
+          hint="How many people must agree before a withdrawal is approved"
+          delay={0.2}
+          icon={
+            <>
+              <circle cx="12" cy="12" r="9" />
+              <path d="M8 12.5l3 3 5-6" />
+            </>
+          }
+        >
+          {isOrganizer ? (
+            <form onSubmit={handleSaveRule} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
+                <button
+                  type="button"
+                  aria-label="Require one fewer approval"
+                  onClick={() => setMinApprovals((n) => Math.max(1, n - 1))}
+                  disabled={minApprovals <= 1}
+                  style={stepperButton}
+                >
+                  −
+                </button>
+                <div style={{ textAlign: 'center', minWidth: 90 }}>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-heading), sans-serif',
+                      fontWeight: 700,
+                      fontSize: 38,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {minApprovals}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 4 }}>
+                    of {members.length} team {members.length === 1 ? 'member' : 'members'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Require one more approval"
+                  onClick={() => setMinApprovals((n) => Math.min(maxApprovals, n + 1))}
+                  disabled={minApprovals >= maxApprovals}
+                  style={stepperButton}
+                >
+                  +
                 </button>
               </div>
-            )}
-          </>
-        ) : (
-          <p className="muted-text">Only the organizer can add or change team members.</p>
-        )}
-      </div>
-
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Approval rule</h2>
-        {isOrganizer ? (
-          <form onSubmit={handleSaveRule} style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            <label>
-              Approvals required before a withdrawal is approved:
-              <input type="number" min="1" value={minApprovals}
-                onChange={(e) => setMinApprovals(e.target.value)} style={{ marginLeft: 8, width: 60 }} />
-            </label>
-            <button type="submit">Save</button>
-            {ruleSaved && <span style={{ color: 'var(--color-primary)', fontSize: 13 }}>Saved!</span>}
-          </form>
-        ) : (
-          <p>This project currently requires <strong>{minApprovals}</strong> approval(s) per withdrawal.</p>
-        )}
-        {ruleError && <p style={{ color: 'var(--color-danger)', fontSize: 13 }}>{ruleError}</p>}
-        {isOrganizer && (
-          <p className="muted-text" style={{ marginTop: 8 }}>
-            You currently have {members.length} team member(s). The rule can&apos;t exceed the number of eligible approvers.
-          </p>
-        )}
+              <p className="muted-text" style={{ margin: 0, fontSize: 12, textAlign: 'center' }}>
+                The rule can&apos;t exceed the number of eligible approvers.
+              </p>
+              {ruleError && <Notice kind="error">{ruleError}</Notice>}
+              {ruleSaved && <Notice kind="success">✓ Approval rule saved.</Notice>}
+              <button type="submit" style={{ height: 46 }}>
+                Save rule
+              </button>
+            </form>
+          ) : (
+            <p style={{ margin: 0, fontSize: 14 }}>
+              This project currently requires <strong>{minApprovals}</strong> approval(s) per withdrawal.
+            </p>
+          )}
+        </Section>
       </div>
     </main>
   );
