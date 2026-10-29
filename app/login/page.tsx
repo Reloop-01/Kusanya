@@ -65,12 +65,19 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-        <PasswordField
-          value={password}
-          onChange={setPassword}
-          placeholder="Password"
-          autoComplete="current-password"
-        />
+        <div>
+          <PasswordField
+            value={password}
+            onChange={setPassword}
+            placeholder="Password"
+            autoComplete="current-password"
+          />
+          <div style={{ textAlign: 'right', marginTop: 6 }}>
+            <a href="/forgot-password" style={{ fontSize: 13, fontWeight: 600 }}>
+              Forgot password?
+            </a>
+          </div>
+        </div>
 
         {error && (
           <p role="alert" style={{ color: 'var(--color-danger)', fontSize: 13, margin: 0 }}>

@@ -3,83 +3,19 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
-import PageHero from '@/components/PageHero';
-
-const BUCKET = 'project-media';
-const MAX_FILES = 10;
-const MB = 1024 * 1024;
-
-type Kind = 'image' | 'video' | 'document';
+import PageHeader from '@/components/PageHeader';
+import { Section, Notice } from '@/components/ui';
+import { ACCEPT, BUCKET, MAX_FILES, MediaKind, formatSize, uploadProjectFile } from '@/lib/mediaUpload';
 
 type MediaItem = {
   id: string;
-  kind: Kind;
+  kind: MediaKind;
   file_name: string;
   storage_path: string;
   mime_type: string;
   size_bytes: number;
   created_at: string;
 };
-
-const ACCEPT = 'image/jpeg,image/png,image/webp,video/mp4,video/webm,application/pdf';
-
-function kindOf(mime: string): Kind | null {
-  if (mime === 'image/jpeg' || mime === 'image/png' || mime === 'image/webp') return 'image';
-  if (mime === 'video/mp4' || mime === 'video/webm') return 'video';
-  if (mime === 'application/pdf') return 'document';
-  return null;
-}
-
-function extensionOf(mime: string): string {
-  switch (mime) {
-    case 'image/jpeg':
-      return 'jpg';
-    case 'image/png':
-      return 'png';
-    case 'image/webp':
-      return 'webp';
-    case 'video/mp4':
-      return 'mp4';
-    case 'video/webm':
-      return 'webm';
-    default:
-      return 'pdf';
-  }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= MB) return `${(bytes / MB).toFixed(1)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-// Shrinks a photo to at most 1600 pixels on its longest side and saves it as a JPEG.
-// Re-saving also removes hidden data such as the GPS location.
-async function shrinkImage(file: File): Promise<File> {
-  try {
-    const bitmap = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
-    const width = Math.round(bitmap.width * scale);
-    const height = Math.round(bitmap.height * scale);
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) return file;
-
-    context.fillStyle = '#FFFFFF';
-    context.fillRect(0, 0, width, height);
-    context.drawImage(bitmap, 0, 0, width, height);
-
-    const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
-    if (!blob) return file;
-
-    const baseName = file.name.replace(/\.[^.]+$/, '') || 'photo';
-    return new File([blob], `${baseName}.jpg`, { type: 'image/jpeg' });
-  } catch {
-    return file;
-  }
-}
 
 function Preview({ item, url }: { item: MediaItem; url: string | undefined }) {
   const box: React.CSSProperties = {
@@ -149,10 +85,13 @@ export default function MaterialsPage() {
   const [checkingAccess, setCheckingAccess] = useState(true);
   const [isOrganizer, setIsOrganizer] = useState(false);
   const [projectTitle, setProjectTitle] = useState('');
+  const [visibility, setVisibility] = useState('link_only');
   const [items, setItems] = useState<MediaItem[]>([]);
+  const [loadingList, setLoadingList] = useState(true);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const [uploadStatus, setUploadStatus] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -173,8 +112,13 @@ export default function MaterialsPage() {
     setCheckingAccess(false);
     if (!organizer) return;
 
-    const { data: project } = await supabase.from('projects').select('title').eq('id', projectId).single();
+    const { data: project } = await supabase
+      .from('projects')
+      .select('title, visibility')
+      .eq('id', projectId)
+      .single();
     setProjectTitle(project?.title ?? '');
+    setVisibility(project?.visibility ?? 'link_only');
 
     const { data: rows } = await supabase
       .from('project_media')
@@ -200,13 +144,14 @@ export default function MaterialsPage() {
     } else {
       setUrls({});
     }
+    setLoadingList(false);
   }, [projectId, router]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  async function handleFiles(fileList: FileList | null) {
+  async function handleFiles(fileList: FileList | File[] | null) {
     if (!fileList || fileList.length === 0) return;
     setProblems([]);
 
@@ -224,59 +169,9 @@ export default function MaterialsPage() {
     }
 
     for (let i = 0; i < files.length; i++) {
-      const original = files[i];
       setUploadStatus(`Uploading ${i + 1} of ${files.length}…`);
-
-      const kind = kindOf(original.type);
-      if (!kind) {
-        issues.push(`"${original.name}" is not a supported file type. Use JPG, PNG, WebP, MP4, WebM or PDF.`);
-        continue;
-      }
-
-      if (kind === 'image' && original.size > 25 * MB) {
-        issues.push(`"${original.name}" is too large (${formatSize(original.size)}). Photos can be up to 25 MB.`);
-        continue;
-      }
-      if (kind === 'video' && original.size > 25 * MB) {
-        issues.push(`"${original.name}" is too large (${formatSize(original.size)}). Videos can be up to 25 MB.`);
-        continue;
-      }
-      if (kind === 'document' && original.size > 10 * MB) {
-        issues.push(`"${original.name}" is too large (${formatSize(original.size)}). PDFs can be up to 10 MB.`);
-        continue;
-      }
-
-      const file = kind === 'image' ? await shrinkImage(original) : original;
-      if (kind === 'image' && file.size > 5 * MB) {
-        issues.push(`"${original.name}" is still over 5 MB after shrinking. Please choose a smaller photo.`);
-        continue;
-      }
-
-      const storagePath = `${projectId}/${crypto.randomUUID()}.${extensionOf(file.type)}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, file, { contentType: file.type, upsert: false });
-
-      if (uploadError) {
-        issues.push(`Could not upload "${original.name}": ${uploadError.message}`);
-        continue;
-      }
-
-      const { error: insertError } = await supabase.from('project_media').insert({
-        project_id: projectId,
-        kind,
-        file_name: original.name,
-        storage_path: storagePath,
-        mime_type: file.type,
-        size_bytes: file.size,
-      });
-
-      if (insertError) {
-        // Tidy up: remove the file we just uploaded, since it could not be listed.
-        await supabase.storage.from(BUCKET).remove([storagePath]);
-        issues.push(`Could not save "${original.name}": ${insertError.message}`);
-      }
+      const problem = await uploadProjectFile(projectId, files[i]);
+      if (problem) issues.push(problem);
     }
 
     setUploadStatus('');
@@ -300,11 +195,7 @@ export default function MaterialsPage() {
   }
 
   if (checkingAccess) {
-    return (
-      <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}>
-        <p>Loading...</p>
-      </main>
-    );
+    return <main style={{ maxWidth: 600, margin: '60px auto', padding: 24 }}><p>Loading...</p></main>;
   }
 
   if (!isOrganizer) {
@@ -321,51 +212,84 @@ export default function MaterialsPage() {
   const isUploading = uploadStatus !== '';
 
   return (
-    <main style={{ paddingBottom: 40 }}>
-      <PageHero
+    <main style={{ maxWidth: 640, margin: '0 auto', padding: '24px 22px 8px' }}>
+      <PageHeader
+        backHref={`/projects/${projectId}`}
+        backLabel="Back to project"
         title="Project materials"
         subtitle={projectTitle}
-        backHref={`/projects/${projectId}`}
-        backLabel="← Back to project"
       />
 
-      <div style={{ maxWidth: 700, margin: '0 auto', padding: '0 22px' }}>
-        {/* Privacy warning */}
-        <div
-          style={{
-            marginTop: 22,
-            background: 'var(--tile-sand-bg)',
-            color: 'var(--tile-sand-ic)',
-            borderRadius: 14,
-            padding: '12px 14px',
-            fontSize: 13,
-            lineHeight: 1.5,
-          }}
-        >
-          <strong>Before you upload:</strong> everything here can be seen by anyone who can open the project page.
-          Don&apos;t upload ID documents, medical records or other private details.
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="k-rise" style={{ animationDelay: '0.03s' }}>
+          <Notice kind="info">
+            {visibility === 'private' ? (
+              <>Only members of this project can see these files.</>
+            ) : (
+              <>
+                <strong>Before you upload:</strong> everything here can be seen by anyone who can open the project
+                page. Don&apos;t upload ID documents, medical records or other private details.
+              </>
+            )}
+          </Notice>
         </div>
 
-        {/* Upload */}
-        <div className="card" style={{ marginTop: 16, borderRadius: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <div>
-              <div style={{ fontFamily: 'var(--font-heading), sans-serif', fontWeight: 700, fontSize: 16 }}>
-                Add photos, videos or PDFs
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 2 }}>
-                {items.length} of {MAX_FILES} used
-              </div>
+        {/* ---------- UPLOAD ---------- */}
+        <Section
+          title="Add photos, videos or PDFs"
+          hint={`${items.length} of ${MAX_FILES} used`}
+          delay={0.08}
+          icon={
+            <>
+              <path d="M12 16V5M7 9l5-5 5 5" />
+              <path d="M5 16v3a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3" />
+            </>
+          }
+        >
+          <div
+            role="button"
+            tabIndex={0}
+            aria-disabled={isFull || isUploading}
+            onClick={() => !isFull && !isUploading && fileInputRef.current?.click()}
+            onKeyDown={(e) => {
+              if ((e.key === 'Enter' || e.key === ' ') && !isFull && !isUploading) {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              if (!isFull && !isUploading) handleFiles(e.dataTransfer.files);
+            }}
+            style={{
+              border: `2px dashed ${dragging ? 'var(--color-primary)' : 'var(--color-input-border)'}`,
+              background: dragging ? 'var(--tile-mint-bg)' : 'transparent',
+              borderRadius: 16,
+              padding: '22px 16px',
+              textAlign: 'center',
+              cursor: isFull || isUploading ? 'default' : 'pointer',
+              opacity: isFull ? 0.6 : 1,
+              transition: 'background-color 0.2s ease, border-color 0.2s ease',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700 }}>
+              {isUploading
+                ? uploadStatus
+                : isFull
+                  ? 'This project has the most files allowed'
+                  : 'Tap to choose files, or drag them here'}
             </div>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isFull || isUploading}
-              style={{ flexShrink: 0 }}
-            >
-              {isUploading ? 'Uploading…' : 'Choose files'}
-            </button>
+            <div style={{ fontSize: 12, color: 'var(--color-muted)', marginTop: 4, lineHeight: 1.5 }}>
+              Photos (JPG, PNG, WebP) are shrunk automatically and hidden location data is removed. PDFs up to 10 MB,
+              short videos (MP4, WebM) up to 25 MB.
+            </div>
           </div>
-
           <input
             ref={fileInputRef}
             type="file"
@@ -375,116 +299,109 @@ export default function MaterialsPage() {
             onChange={(e) => handleFiles(e.target.files)}
           />
 
-          <p style={{ fontSize: 12, color: 'var(--color-muted)', margin: '12px 0 0', lineHeight: 1.5 }}>
-            Photos (JPG, PNG, WebP) are shrunk automatically and hidden location data is removed. PDFs can be up to
-            10 MB. Short videos (MP4, WebM) can be up to 25 MB.
-          </p>
+          {problems.length > 0 && (
+            <Notice kind="error">
+              {problems.map((p, i) => (
+                <div key={i}>{p}</div>
+              ))}
+            </Notice>
+          )}
+        </Section>
 
-          {isUploading && <p style={{ fontSize: 13, fontWeight: 600, margin: '10px 0 0' }}>{uploadStatus}</p>}
-        </div>
+        {/* ---------- LIST ---------- */}
+        <div>
+          <h2 style={{ margin: '8px 0 12px', fontSize: 17 }}>Your materials</h2>
 
-        {/* Problems */}
-        {problems.length > 0 && (
-          <div
-            role="alert"
-            style={{
-              marginTop: 14,
-              border: '1px solid var(--color-danger)',
-              borderRadius: 14,
-              padding: '10px 14px',
-              fontSize: 13,
-              color: 'var(--color-danger)',
-              lineHeight: 1.5,
-            }}
-          >
-            {problems.map((p, i) => (
-              <div key={i}>{p}</div>
-            ))}
-          </div>
-        )}
+          {loadingList && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="k-skeleton" style={{ height: 170, borderRadius: 14 }} />
+              ))}
+            </div>
+          )}
 
-        {/* List */}
-        <h2 style={{ margin: '24px 0 12px', fontSize: 16 }}>Your materials</h2>
+          {!loadingList && items.length === 0 && (
+            <p className="muted-text" style={{ fontSize: 13 }}>
+              Nothing here yet. Add a photo, a short video or a PDF to help people understand what you are raising
+              money for. The first one you add becomes the cover shown on the Discover page.
+            </p>
+          )}
 
-        {items.length === 0 && (
-          <p className="muted-text" style={{ fontSize: 13 }}>
-            Nothing here yet. Add a photo, a short video or a PDF to help people understand what you are raising money
-            for. The first one you add becomes the cover shown on the Discover page.
-          </p>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
-          {items.map((item, index) => (
-            <div
-              key={item.id}
-              style={{
-                position: 'relative',
-                background: 'var(--color-surface)',
-                border: '1px solid var(--color-track)',
-                borderRadius: 14,
-                overflow: 'hidden',
-              }}
-            >
-              {index === 0 && (
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: 8,
-                    left: 8,
-                    zIndex: 1,
-                    background: 'var(--color-accent)',
-                    color: '#0B2B27',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                  }}
-                >
-                  Cover
-                </span>
-              )}
-              <Preview item={item} url={urls[item.storage_path]} />
-              <div style={{ padding: '8px 10px 10px' }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                  title={item.file_name}
-                >
-                  {item.file_name}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{formatSize(item.size_bytes)}</div>
-                <div style={{ display: 'flex', gap: 14, marginTop: 6 }}>
-                  {urls[item.storage_path] && (
-                    <a
-                      href={urls[item.storage_path]}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ fontSize: 12, fontWeight: 600 }}
-                    >
-                      Open
-                    </a>
-                  )}
-                  <button
-                    onClick={() => handleDelete(item)}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+            {items.map((item, index) => (
+              <div
+                key={item.id}
+                className="k-rise"
+                style={{
+                  position: 'relative',
+                  background: 'var(--color-surface)',
+                  border: '1px solid var(--color-track)',
+                  borderRadius: 14,
+                  overflow: 'hidden',
+                  animationDelay: `${Math.min(index * 0.05, 0.4)}s`,
+                }}
+              >
+                {index === 0 && (
+                  <span
                     style={{
-                      background: 'transparent',
-                      color: 'var(--color-danger)',
-                      padding: 0,
-                      fontSize: 12,
-                      fontWeight: 600,
+                      position: 'absolute',
+                      top: 8,
+                      left: 8,
+                      zIndex: 1,
+                      background: 'var(--color-accent)',
+                      color: '#0B2B27',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 999,
                     }}
                   >
-                    Delete
-                  </button>
+                    Cover
+                  </span>
+                )}
+                <Preview item={item} url={urls[item.storage_path]} />
+                <div style={{ padding: '8px 10px 10px' }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={item.file_name}
+                  >
+                    {item.file_name}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--color-muted)' }}>{formatSize(item.size_bytes)}</div>
+                  <div style={{ display: 'flex', gap: 14, marginTop: 6 }}>
+                    {urls[item.storage_path] && (
+                      <a
+                        href={urls[item.storage_path]}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 12, fontWeight: 600 }}
+                      >
+                        Open
+                      </a>
+                    )}
+                    <button
+                      onClick={() => handleDelete(item)}
+                      style={{
+                        background: 'transparent',
+                        color: 'var(--color-danger)',
+                        padding: 0,
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </main>
