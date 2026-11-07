@@ -19,6 +19,13 @@ type Contribution = {
 
 type Filter = 'all' | 'pending' | 'confirmed' | 'rejected';
 
+// An M-Pesa transaction code: 10 characters, starts with a letter,
+// capital letters and digits only, with at least one digit (e.g. QGH7XYZ123).
+function looksLikeMpesaCode(value: string): boolean {
+  const code = value.trim().toUpperCase();
+  return /^[A-Z][A-Z0-9]{9}$/.test(code) && /[0-9]/.test(code);
+}
+
 function statusStyle(status: string): React.CSSProperties {
   if (status === 'confirmed') return { background: 'var(--tile-mint-bg)', color: 'var(--tile-mint-ic)' };
   if (status === 'rejected') return { background: 'var(--tile-peach-bg)', color: 'var(--tile-peach-ic)' };
@@ -121,11 +128,15 @@ export default function ContributionsPage() {
     loadData();
   }, [loadData]);
 
-  // Heads-up if this reference (e.g. an M-Pesa code) was already recorded.
+  // Heads-up if this reference was already recorded in this project.
   const referenceKey = reference.trim().toLowerCase();
   const duplicate = referenceKey
-    ? contributions.find((c) => (c.reference ?? '').trim().toLowerCase() === referenceKey)
+    ? contributions.find(
+        (c) => c.status !== 'rejected' && (c.reference ?? '').trim().toLowerCase() === referenceKey
+      )
     : undefined;
+
+  const referenceIsMpesa = looksLikeMpesaCode(reference);
 
   async function handleAddContribution(e: React.FormEvent) {
     e.preventDefault();
@@ -133,11 +144,19 @@ export default function ContributionsPage() {
     setNotice('');
     setLoading(true);
 
+    // M-Pesa codes are saved in capital letters so they always match.
+    const cleanReference = reference.trim();
+    const referenceToSave = cleanReference
+      ? looksLikeMpesaCode(cleanReference)
+        ? cleanReference.toUpperCase()
+        : cleanReference
+      : null;
+
     const { error: insertError } = await supabase.from('contributions').insert({
       project_id: projectId,
       contributor_name: name,
       amount: Number(amount),
-      reference: reference.trim() || null,
+      reference: referenceToSave,
       status: 'pending',
       is_anonymous: isAnonymous,
     });
@@ -145,7 +164,13 @@ export default function ContributionsPage() {
     setLoading(false);
 
     if (insertError) {
-      setError(insertError.message);
+      if (insertError.code === '23505') {
+        setError(
+          'This M-Pesa code has already been recorded. A payment can only be counted once. If one payment covers two projects, add a suffix to the code (for example -B) on the second one.'
+        );
+      } else {
+        setError(insertError.message);
+      }
       return;
     }
 
@@ -290,12 +315,27 @@ export default function ContributionsPage() {
             <div>
               <input
                 type="text"
-                placeholder="Reference / M-Pesa code (optional)"
-                aria-label="Reference or M-Pesa code"
+                placeholder="M-Pesa code or reference (optional)"
+                aria-label="M-Pesa code or reference"
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
+                autoCapitalize="characters"
                 style={{ width: '100%' }}
               />
+              {reference.trim() !== '' && (
+                <p
+                  style={{
+                    margin: '6px 2px 0',
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                    color: referenceIsMpesa ? 'var(--color-primary)' : 'var(--color-muted)',
+                  }}
+                >
+                  {referenceIsMpesa
+                    ? '✓ Looks like an M-Pesa code. It can only be recorded once in Kusanya.'
+                    : 'Not in M-Pesa code format, so it is saved as a plain reference.'}
+                </p>
+              )}
               {duplicate && (
                 <p
                   role="alert"
@@ -365,7 +405,7 @@ export default function ContributionsPage() {
             </button>
 
             {error && (
-              <p role="alert" style={{ color: 'var(--color-danger)', fontSize: 13, margin: 0 }}>
+              <p role="alert" style={{ color: 'var(--color-danger)', fontSize: 13, margin: 0, lineHeight: 1.45 }}>
                 {error}
               </p>
             )}
