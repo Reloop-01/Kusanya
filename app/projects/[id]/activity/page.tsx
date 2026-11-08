@@ -6,7 +6,14 @@ import { supabase } from '@/lib/supabaseClient';
 import PageHeader from '@/components/PageHeader';
 import { dayLabel, timeOfDay } from '@/lib/format';
 
-type EventType = 'created' | 'joined' | 'contribution' | 'withdrawal' | 'decision';
+type EventType =
+  | 'created'
+  | 'joined'
+  | 'contribution'
+  | 'reversal'
+  | 'withdrawal'
+  | 'cancellation'
+  | 'decision';
 
 type Event = {
   id: string;
@@ -28,6 +35,8 @@ const FILTERS: { key: Filter; label: string }[] = [
 function matchesFilter(type: EventType, filter: Filter): boolean {
   if (filter === 'all') return true;
   if (filter === 'members') return type === 'created' || type === 'joined';
+  if (filter === 'contribution') return type === 'contribution' || type === 'reversal';
+  if (filter === 'withdrawal') return type === 'withdrawal' || type === 'cancellation';
   return type === filter;
 }
 
@@ -35,8 +44,21 @@ function typeLook(type: EventType): { bg: string; ink: string; icon: React.React
   switch (type) {
     case 'contribution':
       return { bg: 'var(--tile-mint-bg)', ink: 'var(--tile-mint-ic)', icon: <path d="M12 5v14M5 12h14" /> };
+    case 'reversal':
+      return {
+        bg: 'var(--tile-peach-bg)',
+        ink: 'var(--tile-peach-ic)',
+        icon: (
+          <>
+            <path d="M9 14L4 9l5-5" />
+            <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+          </>
+        ),
+      };
     case 'withdrawal':
       return { bg: 'var(--tile-peach-bg)', ink: 'var(--tile-peach-ic)', icon: <path d="M7 17L17 7M9 7h8v8" /> };
+    case 'cancellation':
+      return { bg: 'var(--color-track)', ink: 'var(--color-muted)', icon: <path d="M6 6l12 12M18 6L6 18" /> };
     case 'decision':
       return { bg: 'var(--tile-sky-bg)', ink: 'var(--tile-sky-ic)', icon: <path d="M5 12.5l4.5 4.5L19 7.5" /> };
     case 'joined':
@@ -138,8 +160,10 @@ export default function ActivityPage() {
       .from('contributions')
       .select('id, contributor_name, amount, status, created_at, is_anonymous')
       .eq('project_id', projectId);
+    const whoByContributionId: Record<string, string> = {};
     (contribs ?? []).forEach((c) => {
       const who = c.is_anonymous ? 'An anonymous contributor' : c.contributor_name;
+      whoByContributionId[c.id] = c.is_anonymous ? 'an anonymous contributor' : (c.contributor_name ?? 'someone');
       list.push({
         id: `contribution-${c.id}`,
         timestamp: c.created_at,
@@ -148,9 +172,25 @@ export default function ActivityPage() {
       });
     });
 
+    // Reversals (same visibility as contributions)
+    const { data: reversalRows } = await supabase
+      .from('contribution_reversals')
+      .select('id, contribution_id, amount, reason, reversed_by, created_at')
+      .eq('project_id', projectId);
+    (reversalRows ?? []).forEach((r) => {
+      list.push({
+        id: `reversal-${r.id}`,
+        timestamp: r.created_at,
+        type: 'reversal',
+        text: `${nameById[r.reversed_by] ?? 'Someone'} reversed a KES ${r.amount.toLocaleString()} contribution from ${
+          whoByContributionId[r.contribution_id] ?? 'a contributor'
+        } — "${r.reason}"`,
+      });
+    });
+
     const { data: requests } = await supabase
       .from('withdrawal_requests')
-      .select('id, amount, purpose, requester_id, created_at')
+      .select('id, amount, purpose, requester_id, created_at, cancelled_by, cancelled_at, cancel_reason')
       .eq('project_id', projectId);
     (requests ?? []).forEach((r) => {
       list.push({
@@ -159,6 +199,16 @@ export default function ActivityPage() {
         type: 'withdrawal',
         text: `${nameById[r.requester_id] ?? 'Someone'} requested KES ${r.amount.toLocaleString()} for "${r.purpose}"`,
       });
+      if (r.cancelled_at) {
+        let text = `${nameById[r.cancelled_by] ?? 'Someone'} cancelled the KES ${r.amount.toLocaleString()} withdrawal request for "${r.purpose}"`;
+        if (r.cancel_reason) text += ` — "${r.cancel_reason}"`;
+        list.push({
+          id: `cancel-${r.id}`,
+          timestamp: r.cancelled_at,
+          type: 'cancellation',
+          text,
+        });
+      }
     });
 
     const requestIds = (requests ?? []).map((r) => r.id);
@@ -210,10 +260,10 @@ export default function ActivityPage() {
 
   const counts: Record<Filter, number> = {
     all: events.length,
-    contribution: events.filter((e) => e.type === 'contribution').length,
-    withdrawal: events.filter((e) => e.type === 'withdrawal').length,
+    contribution: events.filter((e) => matchesFilter(e.type, 'contribution')).length,
+    withdrawal: events.filter((e) => matchesFilter(e.type, 'withdrawal')).length,
     decision: events.filter((e) => e.type === 'decision').length,
-    members: events.filter((e) => e.type === 'created' || e.type === 'joined').length,
+    members: events.filter((e) => matchesFilter(e.type, 'members')).length,
   };
 
   const visible = events.filter((e) => matchesFilter(e.type, filter));

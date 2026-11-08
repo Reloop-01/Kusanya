@@ -31,15 +31,20 @@ type WithdrawalRequest = {
   status: string;
   requester_id: string;
   created_at: string;
+  cancelled_by: string | null;
+  cancel_reason: string | null;
   withdrawal_approvals: Approval[];
   documents: Doc[];
 };
 
-type Filter = 'all' | 'pending' | 'approved' | 'rejected';
+type Filter = 'all' | 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+type Dialog = { kind: 'reject' | 'cancel'; request: WithdrawalRequest } | null;
 
 function statusLook(status: string): { bg: string; ink: string } {
   if (status === 'approved' || status === 'paid') return { bg: 'var(--tile-mint-bg)', ink: 'var(--tile-mint-ic)' };
   if (status === 'rejected') return { bg: 'var(--tile-peach-bg)', ink: 'var(--tile-peach-ic)' };
+  if (status === 'cancelled') return { bg: 'var(--color-track)', ink: 'var(--color-muted)' };
   return { bg: 'var(--tile-sand-bg)', ink: 'var(--tile-sand-ic)' };
 }
 
@@ -160,12 +165,13 @@ export default function WithdrawalsPage() {
   const [purpose, setPurpose] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [pageNotice, setPageNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<Filter>('all');
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [rejecting, setRejecting] = useState<WithdrawalRequest | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialogReason, setDialogReason] = useState('');
 
   const loadData = useCallback(async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -210,7 +216,9 @@ export default function WithdrawalsPage() {
 
     const { data: reqs } = await supabase
       .from('withdrawal_requests')
-      .select('id, amount, purpose, status, requester_id, created_at, withdrawal_approvals(id, approver_id, decision, reason)')
+      .select(
+        'id, amount, purpose, status, requester_id, created_at, cancelled_by, cancel_reason, withdrawal_approvals(id, approver_id, decision, reason)'
+      )
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
 
@@ -310,13 +318,44 @@ export default function WithdrawalsPage() {
     await submitDecision(r.id, 'approved', null);
   }
 
-  async function handleConfirmReject() {
-    if (!rejecting) return;
-    const ok = await submitDecision(rejecting.id, 'rejected', rejectReason.trim() || null);
-    if (ok) {
-      setRejecting(null);
-      setRejectReason('');
+  function openDialog(kind: 'reject' | 'cancel', request: WithdrawalRequest) {
+    setDialog({ kind, request });
+    setDialogReason('');
+    setActionError('');
+  }
+
+  function closeDialog() {
+    setDialog(null);
+    setDialogReason('');
+  }
+
+  async function handleConfirmDialog() {
+    if (!dialog) return;
+    const reason = dialogReason.trim() || null;
+
+    if (dialog.kind === 'reject') {
+      const ok = await submitDecision(dialog.request.id, 'rejected', reason);
+      if (ok) closeDialog();
+      return;
     }
+
+    setBusyId(dialog.request.id);
+    setActionError('');
+    const { error: cancelError } = await supabase.rpc('cancel_withdrawal_request', {
+      p_withdrawal_id: dialog.request.id,
+      p_reason: reason,
+    });
+    setBusyId(null);
+
+    if (cancelError) {
+      setActionError(cancelError.message);
+      return;
+    }
+
+    closeDialog();
+    setPageNotice('The request was cancelled and the money is available again.');
+    setTimeout(() => setPageNotice(''), 6000);
+    await loadData();
   }
 
   async function handleViewDocument(path: string) {
@@ -363,6 +402,7 @@ export default function WithdrawalsPage() {
     pending: pending.length,
     approved: requests.filter((r) => matchesFilter(r.status, 'approved')).length,
     rejected: requests.filter((r) => r.status === 'rejected').length,
+    cancelled: requests.filter((r) => r.status === 'cancelled').length,
   };
   const visible = requests.filter((r) => matchesFilter(r.status, filter));
 
@@ -374,6 +414,7 @@ export default function WithdrawalsPage() {
     { key: 'pending', label: 'Pending' },
     { key: 'approved', label: 'Approved' },
     { key: 'rejected', label: 'Rejected' },
+    { key: 'cancelled', label: 'Cancelled' },
   ];
 
   return (
@@ -384,6 +425,12 @@ export default function WithdrawalsPage() {
         title="Withdrawal requests"
         subtitle="Money only leaves the project when the approvers agree."
       />
+
+      {pageNotice && (
+        <div style={{ marginBottom: 14 }}>
+          <Notice kind="success">✓ {pageNotice}</Notice>
+        </div>
+      )}
 
       {/* ---------- SUMMARY ---------- */}
       <div
@@ -467,7 +514,7 @@ export default function WithdrawalsPage() {
         ))}
       </div>
 
-      {actionError && (
+      {actionError && !dialog && (
         <div style={{ marginBottom: 12 }}>
           <Notice kind="error">{actionError}</Notice>
         </div>
@@ -500,6 +547,7 @@ export default function WithdrawalsPage() {
           const approvedCount = r.withdrawal_approvals.filter((a) => a.decision === 'approved').length;
           const rejectedCount = r.withdrawal_approvals.filter((a) => a.decision === 'rejected').length;
           const busy = busyId === r.id;
+          const canCancel = r.status === 'pending' && (isRequester || myRole === 'organizer');
 
           return (
             <article
@@ -512,11 +560,18 @@ export default function WithdrawalsPage() {
                 padding: 16,
                 boxShadow: '0 4px 14px var(--color-shadow)',
                 animationDelay: `${Math.min(index * 0.05, 0.4)}s`,
-                opacity: busy ? 0.6 : 1,
+                opacity: busy ? 0.6 : r.status === 'cancelled' ? 0.8 : 1,
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                <div style={{ fontFamily: 'var(--font-heading), sans-serif', fontWeight: 700, fontSize: 20 }}>
+                <div
+                  style={{
+                    fontFamily: 'var(--font-heading), sans-serif',
+                    fontWeight: 700,
+                    fontSize: 20,
+                    textDecoration: r.status === 'cancelled' ? 'line-through' : 'none',
+                  }}
+                >
                   {currency} {r.amount.toLocaleString()}
                 </div>
                 <Pill text={r.status} bg={look.bg} ink={look.ink} />
@@ -526,12 +581,36 @@ export default function WithdrawalsPage() {
                 Requested by {nameById[r.requester_id] ?? 'someone'} · {timeAgo(r.created_at)}
               </div>
 
+              {r.status === 'cancelled' && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: 'var(--color-track)',
+                    borderRadius: 12,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong>Cancelled</strong>
+                  {r.cancelled_by ? ` by ${nameById[r.cancelled_by] ?? 'someone'}` : ''}
+                  {r.cancel_reason && (
+                    <>
+                      <br />
+                      &ldquo;{r.cancel_reason}&rdquo;
+                    </>
+                  )}
+                </div>
+              )}
+
               {/* Votes */}
               <div style={{ marginTop: 12 }}>
                 {r.withdrawal_approvals.length === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>
-                    {r.status === 'pending' ? 'Waiting for approvers to respond.' : 'No approvals recorded.'}
-                  </div>
+                  r.status === 'pending' && (
+                    <div style={{ fontSize: 12, color: 'var(--color-muted)' }}>
+                      Waiting for approvers to respond.
+                    </div>
+                  )
                 ) : (
                   <>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -606,7 +685,7 @@ export default function WithdrawalsPage() {
                 </div>
               )}
 
-              {(myRole === 'organizer' || myRole === 'administrator') && (
+              {(myRole === 'organizer' || myRole === 'administrator') && r.status !== 'cancelled' && (
                 <DocumentUploader projectId={projectId} withdrawalId={r.id} onUploaded={loadData} />
               )}
 
@@ -616,11 +695,7 @@ export default function WithdrawalsPage() {
                     Approve
                   </button>
                   <button
-                    onClick={() => {
-                      setRejecting(r);
-                      setRejectReason('');
-                      setActionError('');
-                    }}
+                    onClick={() => openDialog('reject', r)}
                     disabled={busy}
                     style={{ ...dangerButton, flex: 1, height: 42, padding: 0 }}
                   >
@@ -628,6 +703,27 @@ export default function WithdrawalsPage() {
                   </button>
                 </div>
               )}
+
+              {canCancel && (
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    onClick={() => openDialog('cancel', r)}
+                    disabled={busy}
+                    style={{
+                      background: 'transparent',
+                      color: 'var(--color-muted)',
+                      padding: 0,
+                      height: 'auto',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      textDecoration: 'underline',
+                    }}
+                  >
+                    Cancel this request
+                  </button>
+                </div>
+              )}
+
               {isRequester && r.status === 'pending' && (
                 <p className="muted-text" style={{ marginTop: 10, fontSize: 12 }}>
                   You requested this, so you cannot approve your own request.
@@ -638,13 +734,13 @@ export default function WithdrawalsPage() {
         })}
       </div>
 
-      {/* ---------- REJECT BOX ---------- */}
-      {rejecting && (
+      {/* ---------- REJECT / CANCEL BOX ---------- */}
+      {dialog && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Reject this request"
-          onClick={() => setRejecting(null)}
+          aria-label={dialog.kind === 'reject' ? 'Reject this request' : 'Cancel this request'}
+          onClick={closeDialog}
           style={{
             position: 'fixed',
             inset: 0,
@@ -661,16 +757,22 @@ export default function WithdrawalsPage() {
             onClick={(e) => e.stopPropagation()}
             style={{ width: '100%', maxWidth: 420, borderRadius: 20, padding: 20 }}
           >
-            <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>Reject this request?</h2>
-            <p className="muted-text" style={{ margin: '0 0 12px', fontSize: 13 }}>
-              {currency} {rejecting.amount.toLocaleString()} for &ldquo;{rejecting.purpose}&rdquo;. Your decision cannot be
-              undone.
+            <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>
+              {dialog.kind === 'reject' ? 'Reject this request?' : 'Cancel this request?'}
+            </h2>
+            <p className="muted-text" style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.5 }}>
+              {currency} {dialog.request.amount.toLocaleString()} for &ldquo;{dialog.request.purpose}&rdquo;.{' '}
+              {dialog.kind === 'reject'
+                ? 'Your decision cannot be undone.'
+                : 'It will be marked as cancelled and the money becomes available again. This cannot be undone.'}
             </p>
             <textarea
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
+              value={dialogReason}
+              onChange={(e) => setDialogReason(e.target.value)}
               rows={3}
-              placeholder="Optional: tell the organizer why"
+              placeholder={
+                dialog.kind === 'reject' ? 'Optional: tell the organizer why' : 'Optional: why is it being cancelled?'
+              }
               style={{ width: '100%' }}
             />
             {actionError && (
@@ -679,18 +781,19 @@ export default function WithdrawalsPage() {
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-              <button
-                onClick={() => setRejecting(null)}
-                style={{ ...outlineButton, flex: 1, height: 44, padding: 0 }}
-              >
-                Cancel
+              <button onClick={closeDialog} style={{ ...outlineButton, flex: 1, height: 44, padding: 0 }}>
+                Go back
               </button>
               <button
-                onClick={handleConfirmReject}
-                disabled={busyId === rejecting.id}
+                onClick={handleConfirmDialog}
+                disabled={busyId === dialog.request.id}
                 style={{ flex: 1, height: 44, padding: 0, background: 'var(--color-danger)' }}
               >
-                {busyId === rejecting.id ? 'Rejecting...' : 'Reject request'}
+                {busyId === dialog.request.id
+                  ? 'Working...'
+                  : dialog.kind === 'reject'
+                    ? 'Reject request'
+                    : 'Cancel request'}
               </button>
             </div>
           </div>

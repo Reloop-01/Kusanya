@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import PageHeader from '@/components/PageHeader';
 import { CountUp } from '@/components/ProjectProgress';
+import { Notice, outlineButton, dangerButton } from '@/components/ui';
 import { initialsOf, timeAgo } from '@/lib/format';
 
 type Contribution = {
@@ -17,7 +18,15 @@ type Contribution = {
   is_anonymous: boolean;
 };
 
-type Filter = 'all' | 'pending' | 'confirmed' | 'rejected';
+type Reversal = {
+  reason: string;
+  created_at: string;
+  reversed_by: string;
+};
+
+type Filter = 'all' | 'pending' | 'confirmed' | 'rejected' | 'reversed';
+
+type Dialog = { item: Contribution; mode: 'reverse' | 'correct' } | null;
 
 // An M-Pesa transaction code: 10 characters, starts with a letter,
 // capital letters and digits only, with at least one digit (e.g. QGH7XYZ123).
@@ -29,6 +38,7 @@ function looksLikeMpesaCode(value: string): boolean {
 function statusStyle(status: string): React.CSSProperties {
   if (status === 'confirmed') return { background: 'var(--tile-mint-bg)', color: 'var(--tile-mint-ic)' };
   if (status === 'rejected') return { background: 'var(--tile-peach-bg)', color: 'var(--tile-peach-ic)' };
+  if (status === 'reversed') return { background: 'var(--color-track)', color: 'var(--color-muted)' };
   return { background: 'var(--tile-sand-bg)', color: 'var(--tile-sand-ic)' };
 }
 
@@ -75,16 +85,23 @@ export default function ContributionsPage() {
   const [currency, setCurrency] = useState('KES');
   const [loadingList, setLoadingList] = useState(true);
   const [contributions, setContributions] = useState<Contribution[]>([]);
+  const [reversals, setReversals] = useState<Record<string, Reversal>>({});
+  const [nameById, setNameById] = useState<Record<string, string>>({});
   const [name, setName] = useState('');
   const [amount, setAmount] = useState('');
   const [reference, setReference] = useState('');
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [pageNotice, setPageNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialogReason, setDialogReason] = useState('');
+  const [dialogError, setDialogError] = useState('');
+  const [dialogBusy, setDialogBusy] = useState(false);
 
   const loadData = useCallback(async () => {
     const { data: userData } = await supabase.auth.getUser();
@@ -121,6 +138,30 @@ export default function ContributionsPage() {
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
     setContributions(contribs ?? []);
+
+    const { data: reversalRows } = await supabase
+      .from('contribution_reversals')
+      .select('contribution_id, reason, created_at, reversed_by')
+      .eq('project_id', projectId);
+    const reversalMap: Record<string, Reversal> = {};
+    (reversalRows ?? []).forEach((r) => {
+      reversalMap[r.contribution_id] = {
+        reason: r.reason,
+        created_at: r.created_at,
+        reversed_by: r.reversed_by,
+      };
+    });
+    setReversals(reversalMap);
+
+    const { data: names } = await supabase.rpc('get_project_member_names', {
+      p_project_id: projectId,
+    });
+    const nameMap: Record<string, string> = {};
+    (names ?? []).forEach((n: { user_id: string; full_name: string }) => {
+      nameMap[n.user_id] = n.full_name;
+    });
+    setNameById(nameMap);
+
     setLoadingList(false);
   }, [projectId, router]);
 
@@ -132,7 +173,10 @@ export default function ContributionsPage() {
   const referenceKey = reference.trim().toLowerCase();
   const duplicate = referenceKey
     ? contributions.find(
-        (c) => c.status !== 'rejected' && (c.reference ?? '').trim().toLowerCase() === referenceKey
+        (c) =>
+          c.status !== 'rejected' &&
+          c.status !== 'reversed' &&
+          (c.reference ?? '').trim().toLowerCase() === referenceKey
       )
     : undefined;
 
@@ -191,9 +235,59 @@ export default function ContributionsPage() {
       if (!sure) return;
     }
     setBusyId(item.id);
-    await supabase.from('contributions').update({ status }).eq('id', item.id);
+    setError('');
+    const { error: updateError } = await supabase.from('contributions').update({ status }).eq('id', item.id);
+    if (updateError) setError(updateError.message);
     await loadData();
     setBusyId(null);
+  }
+
+  function openDialog(item: Contribution, mode: 'reverse' | 'correct') {
+    setDialog({ item, mode });
+    setDialogReason('');
+    setDialogError('');
+  }
+
+  async function handleConfirmDialog() {
+    if (!dialog) return;
+    const reason = dialogReason.trim();
+    if (reason.length < 5) {
+      setDialogError('Please give a reason of at least 5 characters.');
+      return;
+    }
+
+    setDialogBusy(true);
+    setDialogError('');
+    const { error: reverseError } = await supabase.rpc('reverse_contribution', {
+      p_contribution_id: dialog.item.id,
+      p_reason: reason,
+    });
+    setDialogBusy(false);
+
+    if (reverseError) {
+      setDialogError(reverseError.message);
+      return;
+    }
+
+    const { item, mode } = dialog;
+    setDialog(null);
+    setDialogReason('');
+    await loadData();
+
+    if (mode === 'correct') {
+      // Put the original details back in the form so they can be fixed and recorded again.
+      setName(item.contributor_name ?? '');
+      setAmount(String(item.amount));
+      setReference(item.reference ?? '');
+      setIsAnonymous(item.is_anonymous);
+      setPageNotice('Reversed. Now fix the details and record the corrected entry below.');
+      setTimeout(() => {
+        document.getElementById('record-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    } else {
+      setPageNotice('Contribution reversed. It no longer counts toward the totals.');
+    }
+    setTimeout(() => setPageNotice(''), 7000);
   }
 
   if (checkingAccess) {
@@ -215,6 +309,7 @@ export default function ContributionsPage() {
   const confirmed = contributions.filter((c) => c.status === 'confirmed');
   const pending = contributions.filter((c) => c.status === 'pending');
   const rejected = contributions.filter((c) => c.status === 'rejected');
+  const reversed = contributions.filter((c) => c.status === 'reversed');
   const confirmedTotal = confirmed.reduce((sum, c) => sum + c.amount, 0);
 
   const counts: Record<Filter, number> = {
@@ -222,6 +317,7 @@ export default function ContributionsPage() {
     pending: pending.length,
     confirmed: confirmed.length,
     rejected: rejected.length,
+    reversed: reversed.length,
   };
 
   const query = search.trim().toLowerCase();
@@ -239,6 +335,7 @@ export default function ContributionsPage() {
     { key: 'pending', label: 'Pending' },
     { key: 'confirmed', label: 'Confirmed' },
     { key: 'rejected', label: 'Rejected' },
+    { key: 'reversed', label: 'Reversed' },
   ];
 
   return (
@@ -249,6 +346,12 @@ export default function ContributionsPage() {
         title="Contributions"
         subtitle={projectTitle}
       />
+
+      {pageNotice && (
+        <div style={{ marginBottom: 14 }}>
+          <Notice kind="success">✓ {pageNotice}</Notice>
+        </div>
+      )}
 
       {/* ---------- SUMMARY ---------- */}
       <div
@@ -267,7 +370,11 @@ export default function ContributionsPage() {
       </div>
 
       {/* ---------- RECORD A CONTRIBUTION ---------- */}
-      <section className="card k-rise" style={{ marginTop: 16, borderRadius: 20, padding: 18, animationDelay: '0.1s' }}>
+      <section
+        id="record-form"
+        className="card k-rise"
+        style={{ marginTop: 16, borderRadius: 20, padding: 18, animationDelay: '0.1s', scrollMarginTop: 16 }}
+      >
         <h2 style={{ margin: '0 0 4px', fontSize: 17 }}>Record a contribution</h2>
         <p className="muted-text" style={{ margin: '0 0 14px', fontSize: 13 }}>
           Add it once the payment has reached your account, then confirm it below.
@@ -497,6 +604,8 @@ export default function ContributionsPage() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {visible.map((c, index) => {
           const busy = busyId === c.id;
+          const isReversed = c.status === 'reversed';
+          const reversal = reversals[c.id];
           return (
             <article
               key={c.id}
@@ -508,7 +617,7 @@ export default function ContributionsPage() {
                 padding: 14,
                 boxShadow: '0 4px 14px var(--color-shadow)',
                 animationDelay: `${Math.min(index * 0.04, 0.4)}s`,
-                opacity: busy ? 0.6 : 1,
+                opacity: busy ? 0.6 : isReversed ? 0.8 : 1,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -570,7 +679,14 @@ export default function ContributionsPage() {
                 </div>
 
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontFamily: 'var(--font-heading), sans-serif', fontWeight: 700, fontSize: 16 }}>
+                  <div
+                    style={{
+                      fontFamily: 'var(--font-heading), sans-serif',
+                      fontWeight: 700,
+                      fontSize: 16,
+                      textDecoration: isReversed ? 'line-through' : 'none',
+                    }}
+                  >
                     {currency} {c.amount.toLocaleString()}
                   </div>
                   <span
@@ -596,6 +712,24 @@ export default function ContributionsPage() {
                 </p>
               )}
 
+              {isReversed && reversal && (
+                <div
+                  style={{
+                    marginTop: 10,
+                    background: 'var(--color-track)',
+                    borderRadius: 12,
+                    padding: '8px 12px',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  <strong>Reversed</strong> by {nameById[reversal.reversed_by] ?? 'someone'} ·{' '}
+                  {timeAgo(reversal.created_at)}
+                  <br />
+                  &ldquo;{reversal.reason}&rdquo;
+                </div>
+              )}
+
               {c.status === 'pending' && (
                 <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
                   <button
@@ -608,23 +742,102 @@ export default function ContributionsPage() {
                   <button
                     onClick={() => updateStatus(c, 'rejected')}
                     disabled={busy}
-                    style={{
-                      flex: 1,
-                      height: 40,
-                      padding: 0,
-                      background: 'transparent',
-                      color: 'var(--color-danger)',
-                      border: '1.5px solid var(--color-danger)',
-                    }}
+                    style={{ ...dangerButton, flex: 1, height: 40, padding: 0 }}
                   >
                     Reject
                   </button>
+                </div>
+              )}
+
+              {c.status === 'confirmed' && (
+                <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => openDialog(c, 'reverse')}
+                    disabled={busy}
+                    style={{ ...dangerButton, flex: 1, height: 38, padding: 0, fontSize: 13 }}
+                  >
+                    Reverse
+                  </button>
+                  {isActive && (
+                    <button
+                      onClick={() => openDialog(c, 'correct')}
+                      disabled={busy}
+                      style={{ ...outlineButton, flex: 1, height: 38, padding: 0, fontSize: 13 }}
+                    >
+                      Correct
+                    </button>
+                  )}
                 </div>
               )}
             </article>
           );
         })}
       </div>
+
+      {/* ---------- REVERSE / CORRECT BOX ---------- */}
+      {dialog && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={dialog.mode === 'correct' ? 'Correct this contribution' : 'Reverse this contribution'}
+          onClick={() => !dialogBusy && setDialog(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100,
+            background: 'rgba(0, 0, 0, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <div
+            className="card k-rise"
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 440, borderRadius: 20, padding: 20 }}
+          >
+            <h2 style={{ margin: '0 0 4px', fontSize: 18 }}>
+              {dialog.mode === 'correct' ? 'Correct this contribution' : 'Reverse this contribution'}
+            </h2>
+            <p className="muted-text" style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.5 }}>
+              {currency} {dialog.item.amount.toLocaleString()} from {dialog.item.contributor_name}.{' '}
+              {dialog.mode === 'correct'
+                ? 'It will be reversed, then you can record the corrected entry. The original stays visible with your reason.'
+                : 'It will stay on the list, marked as reversed with your reason, and will no longer count toward the totals.'}
+            </p>
+            <textarea
+              value={dialogReason}
+              onChange={(e) => setDialogReason(e.target.value)}
+              rows={3}
+              placeholder="Why is this being reversed? (required)"
+              aria-label="Reason"
+              style={{ width: '100%' }}
+            />
+            {dialogError && (
+              <div style={{ marginTop: 10 }}>
+                <Notice kind="error">{dialogError}</Notice>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <button
+                onClick={() => setDialog(null)}
+                disabled={dialogBusy}
+                style={{ ...outlineButton, flex: 1, height: 44, padding: 0 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmDialog}
+                disabled={dialogBusy}
+                style={{ flex: 1, height: 44, padding: 0, background: 'var(--color-danger)' }}
+              >
+                {dialogBusy ? 'Reversing...' : dialog.mode === 'correct' ? 'Reverse and correct' : 'Reverse'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
